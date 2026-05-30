@@ -1,0 +1,206 @@
+import { join, dirname, isAbsolute } from 'path'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { exec, execOrThrow } from '../util/exec'
+import { log } from '../log'
+import * as store from '../store'
+import type { Repo, Worktree } from '@shared/types/domain'
+
+const AGENTS_BEGIN = '<!-- TASKMAN:BEGIN injected coding standards (not committed) -->'
+const AGENTS_END = '<!-- TASKMAN:END -->'
+
+/**
+ * Inject the configured agent-instructions template at the bottom of the
+ * worktree's AGENTS.md (creating it if absent), and arrange for the change to be
+ * ignored by git so it is never committed. Idempotent: re-injection replaces the
+ * previously injected block. Called before any agent is handed the worktree.
+ */
+export async function injectAgentsTemplate(worktreePath: string, content: string): Promise<void> {
+  const trimmed = content.trim()
+  if (!trimmed) return
+  const agentsPath = join(worktreePath, 'AGENTS.md')
+
+  const tracked =
+    (await exec('git', ['-C', worktreePath, 'ls-files', '--error-unmatch', 'AGENTS.md'])).code === 0
+
+  // Strip any prior injected block, then append a fresh one at the bottom.
+  let base = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : ''
+  const re = new RegExp(`\\n*${escapeRe(AGENTS_BEGIN)}[\\s\\S]*?${escapeRe(AGENTS_END)}\\n*`, 'g')
+  base = base.replace(re, '').replace(/\s+$/, '')
+  const block = `${base ? base + '\n\n' : ''}${AGENTS_BEGIN}\n${trimmed}\n${AGENTS_END}\n`
+  writeFileSync(agentsPath, block)
+
+  if (tracked) {
+    // Tracked file: tell git to ignore local modifications so the block isn't committed.
+    await exec('git', ['-C', worktreePath, 'update-index', '--skip-worktree', 'AGENTS.md'])
+  } else {
+    // New file: add to this worktree's exclude so `git add -A` won't stage it.
+    const gp = (
+      await exec('git', ['-C', worktreePath, 'rev-parse', '--git-path', 'info/exclude'])
+    ).stdout.trim()
+    const exPath = gp ? (isAbsolute(gp) ? gp : join(worktreePath, gp)) : ''
+    if (exPath) {
+      const cur = existsSync(exPath) ? readFileSync(exPath, 'utf8') : ''
+      if (!cur.split('\n').includes('AGENTS.md')) {
+        mkdirSync(dirname(exPath), { recursive: true })
+        writeFileSync(exPath, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + 'AGENTS.md\n')
+      }
+    }
+  }
+  log.info('injected AGENTS.md template', { worktreePath, tracked })
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Add patterns to a worktree's git exclude so control files aren't committed. */
+export async function addToGitExclude(worktreePath: string, patterns: string[]): Promise<void> {
+  const gp = (
+    await exec('git', ['-C', worktreePath, 'rev-parse', '--git-path', 'info/exclude'])
+  ).stdout.trim()
+  const exPath = gp ? (isAbsolute(gp) ? gp : join(worktreePath, gp)) : ''
+  if (!exPath) return
+  const cur = existsSync(exPath) ? readFileSync(exPath, 'utf8') : ''
+  const have = new Set(cur.split('\n'))
+  const add = patterns.filter((p) => !have.has(p))
+  if (add.length === 0) return
+  mkdirSync(dirname(exPath), { recursive: true })
+  writeFileSync(exPath, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + add.join('\n') + '\n')
+}
+
+/** Absolute path to the real git binary (so the sandbox wrapper can delegate). */
+export async function resolveRealGit(): Promise<string> {
+  const r = await exec('which', ['git'])
+  const p = r.stdout.trim()
+  return p || '/usr/bin/git'
+}
+
+function worktreeRoot(repo: Repo): string {
+  if (!repo.path) throw new Error(`repo ${repo.name} has no local clone path`)
+  return join(repo.path, '.autopilotv-worktrees')
+}
+
+/**
+ * Provision a worktree for reviewing a PR branch. Precondition (SPEC §7.2): the
+ * branch already exists on the remote. We fetch it and add a detached worktree.
+ */
+export async function provisionReviewWorktree(
+  repo: Repo,
+  prNumber: number,
+  branch: string
+): Promise<Worktree> {
+  if (!repo.path) throw new Error(`repo ${repo.name} not cloned locally`)
+  const cwd = repo.path
+  const dest = join(worktreeRoot(repo), `review-${prNumber}`)
+
+  if (existsSync(dest)) {
+    // stale dir from a crash — try to remove the worktree registration first
+    await exec('git', ['worktree', 'remove', '--force', dest], { cwd })
+  }
+
+  log.info('fetching PR branch', { repo: repo.name, branch })
+  await execOrThrow('git', ['fetch', 'origin', `${branch}:refs/remotes/origin/${branch}`], {
+    cwd
+  }).catch(async () => {
+    // fall back to a plain fetch of the ref
+    await execOrThrow('git', ['fetch', 'origin', branch], { cwd })
+  })
+
+  await execOrThrow('git', ['worktree', 'add', '--force', dest, `origin/${branch}`], { cwd })
+
+  await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
+
+  const id = store.createWorktree({
+    path: dest,
+    repoId: repo.id,
+    branch,
+    kind: 'review',
+    sessionId: null
+  })
+  store.recordEvent('worktree.provisioned', { repo: repo.name, prNumber, path: dest })
+  return store.getWorktree(id)!
+}
+
+/** Provision a fresh feature worktree for the dev line (not sandboxed). */
+export async function provisionDevWorktree(repo: Repo, branch: string): Promise<Worktree> {
+  if (!repo.path) throw new Error(`repo ${repo.name} not cloned locally`)
+  const cwd = repo.path
+  const safe = branch.replace(/[^A-Za-z0-9._/-]/g, '-')
+  const dest = join(worktreeRoot(repo), safe.replace(/\//g, '__'))
+
+  // Self-heal any stale tree/branch from a prior (failed) attempt at this path.
+  if (existsSync(dest)) await exec('git', ['worktree', 'remove', '--force', dest], { cwd })
+  await exec('git', ['worktree', 'prune'], { cwd })
+  await exec('git', ['branch', '-D', branch], { cwd }) // ignore error if it doesn't exist
+
+  await execOrThrow('git', ['fetch', 'origin', repo.defaultBranch], { cwd })
+  await execOrThrow('git', ['worktree', 'add', '-b', branch, dest, `origin/${repo.defaultBranch}`], {
+    cwd
+  })
+  await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
+  await addToGitExclude(dest, ['.pr-url', '.revise', '.address-comments'])
+  const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
+  store.recordEvent('worktree.provisioned', { repo: repo.name, branch, path: dest })
+  return store.getWorktree(id)!
+}
+
+/**
+ * Prune a worktree. Guard: never force-destroy unexpected uncommitted changes
+ * for dev worktrees; review worktrees are read-only so are safe to force-remove.
+ */
+export async function pruneWorktree(
+  worktree: Worktree,
+  opts: { force?: boolean } = {}
+): Promise<boolean> {
+  const repo = store.getRepo(worktree.repoId)
+  if (!repo?.path) {
+    store.markWorktreePruned(worktree.id)
+    return true
+  }
+
+  // Guard against silently discarding unexpected work — unless force is set
+  // (e.g. the user explicitly reset/discarded a failed attempt).
+  if (worktree.kind === 'dev' && !opts.force) {
+    const status = await exec('git', ['status', '--porcelain'], { cwd: worktree.path })
+    if (status.code === 0 && status.stdout.trim().length > 0) {
+      log.warn('refusing to prune dev worktree with uncommitted changes', { path: worktree.path })
+      store.recordEvent('worktree.prune_blocked', { path: worktree.path }, { level: 'warn' })
+      return false
+    }
+  }
+
+  const r = await exec('git', ['worktree', 'remove', '--force', worktree.path], { cwd: repo.path })
+  await exec('git', ['worktree', 'prune'], { cwd: repo.path })
+  if (r.code !== 0 && existsSync(worktree.path)) {
+    log.warn('worktree remove failed', { path: worktree.path, err: r.stderr })
+    store.recordEvent('worktree.prune_failed', { path: worktree.path }, { level: 'warn' })
+    return false
+  }
+  store.markWorktreePruned(worktree.id)
+  store.recordEvent('worktree.pruned', { path: worktree.path })
+  return true
+}
+
+/**
+ * Discard a dev worktree for a retry: force-remove the (possibly dirty) tree and
+ * delete its feature branch, so a fresh attempt can recreate them cleanly.
+ */
+export async function discardWorktree(worktree: Worktree): Promise<void> {
+  const repo = store.getRepo(worktree.repoId)
+  await pruneWorktree(worktree, { force: true })
+  if (repo?.path && worktree.branch) {
+    await exec('git', ['branch', '-D', worktree.branch], { cwd: repo.path })
+  }
+}
+
+/** GC orphaned worktrees with no live session (called during reconciliation). */
+export async function gcOrphanedWorktrees(): Promise<void> {
+  const live = store.listLiveWorktrees()
+  for (const wt of live) {
+    const sess = wt.sessionId ? store.getSession(wt.sessionId) : null
+    const active = sess && ['starting', 'running', 'stalled', 'needs_human'].includes(sess.status)
+    if (!active && wt.kind === 'review') {
+      await pruneWorktree(wt)
+    }
+  }
+}

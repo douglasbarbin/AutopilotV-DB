@@ -1,0 +1,51 @@
+name: Release
+
+# Package the app and publish installers to a GitHub Release when a version tag is pushed.
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package (${{ matrix.os }})
+    # Windows native rebuild (node-pty/node-gyp) is flaky on CI — don't block the
+    # release on it; macOS + Linux must pass.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # node-gyp (via node-pty) still imports distutils, removed in Python 3.12+.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Linux native build deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Package & publish to the release
+        # electron-builder uploads platform artifacts to a draft GitHub Release
+        # named for the package version; review and publish it from the Releases page.
+        run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unsigned artifacts for now — skip macOS code-signing discovery.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
