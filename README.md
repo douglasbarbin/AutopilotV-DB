@@ -21,6 +21,9 @@ loop for the decisions that matter.
 
 ## Overview
 
+<img width="1552" height="1012" alt="image" src="https://github.com/user-attachments/assets/e06072b8-8c83-4557-b4c4-0bbd9751c6f7" />
+
+
 AutopilotV is a single-user desktop application that watches two lanes of work and
 automates their full lifecycle using whatever agent CLIs you have installed —
 Claude Code, Pi, Codex, Cursor, OpenCode, and others:
