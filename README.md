@@ -6,8 +6,8 @@
 
 **An autonomous agent orchestrator for your software work.**
 
-A local "brain" decides what work is yours to do — tracker tasks assigned to you
-and pull requests awaiting your review — and drives it to completion through the
+A local "brain" decides what work is yours to do  tracker tasks assigned to you
+and pull requests awaiting your review  and drives it to completion through the
 coding agents you already use, running in real terminals, while keeping you in the
 loop for the decisions that matter.
 
@@ -25,7 +25,7 @@ loop for the decisions that matter.
 
 
 AutopilotV is a single-user desktop application that watches two lanes of work and
-automates their full lifecycle using whatever agent CLIs you have installed —
+automates their full lifecycle using whatever agent CLIs you have installed 
 Claude Code, Pi, Codex, Cursor, OpenCode, and others:
 
 - **PR Reviewing.** It finds pull requests where review is requested from you,
@@ -34,10 +34,10 @@ Claude Code, Pi, Codex, Cursor, OpenCode, and others:
   verdict to the forge on a single click.
 - **Software Development.** It claims a tracker task, implements it in a feature
   worktree, opens a draft PR, and shepherds that PR through review feedback until
-  it satisfies your merge gates — then stops and waits for you to merge.
+  it satisfies your merge gates  then stops and waits for you to merge.
 
 A deterministic poll loop handles the bookkeeping; an LLM is invoked only for
-judgment — reviewing a change, deciding how to unstick a stalled session, triaging
+judgment  reviewing a change, deciding how to unstick a stalled session, triaging
 work. The consequential actions, approving a review and merging a PR, are always an
 explicit human click.
 
@@ -49,7 +49,7 @@ Coding agents are capable but high-maintenance: you still hunt for the work, pas
 context, babysit terminals, and shuttle results between your tracker, your editor,
 and your forge. AutopilotV automates that connective tissue. It treats your agents
 as interchangeable workers, keeps the orchestration deterministic and inspectable,
-and reserves human judgment for approvals and merges — so you supervise outcomes
+and reserves human judgment for approvals and merges  so you supervise outcomes
 instead of typing prompts.
 
 ## ✨ Highlights
@@ -59,7 +59,7 @@ instead of typing prompts.
 - **Auto-drive.** The brain detects stalled sessions and answers their prompts to
   keep them moving, gated by a destructive-command denylist and a per-session toggle.
 - **Pluggable by design.**
-  - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), and ShipReq — the active
+  - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), and ShipReq  the active
     adapter drives the settings UI.
   - *Harnesses:* any CLI agent; flag one as the review, brain, or coding default.
   - *Brain LLM:* a local OpenAI-compatible endpoint, or any harness run headless.
@@ -73,7 +73,7 @@ instead of typing prompts.
 - **Crash recovery.** Work leases expire and are re-claimable on the next launch;
   orphaned sessions and worktrees are reconciled at boot.
 - **Themes.** Tomorrow Night 80s (default), Tokyo Night, Synthwave, and a light
-  Tomorrow — native window chrome follows the choice.
+  Tomorrow  native window chrome follows the choice.
 - A brain reasoning feed, an audit log, OS notifications, a "drop a terminal in this
   worktree" action, and a one-click database wipe.
 
@@ -95,19 +95,19 @@ instead of typing prompts.
                           └──────────────────────────────┘
 ```
 
-The renderer is deliberately thin: every privileged operation — CLIs, PTYs, the
-database, secrets, LLM calls — lives in the main process behind a narrow, typed
+The renderer is deliberately thin: every privileged operation  CLIs, PTYs, the
+database, secrets, LLM calls  lives in the main process behind a narrow, typed
 preload bridge.
 
 ## Requirements
 
 - **Node 22+**
-- **[`gh`](https://cli.github.com/)** authenticated (`gh auth login`) — used for PR
+- **[`gh`](https://cli.github.com/)** authenticated (`gh auth login`)  used for PR
   discovery, reviews, and GitHub Projects.
 - A project tracker: **Jira** via Atlassian **`acli`**, **GitHub Projects** (via
   `gh`), or **ShipReq** (an HTTP endpoint).
 - For LLM judgment: a local **OpenAI-compatible** server (for example LM Studio,
-  default `http://127.0.0.1:1234`), or any agent CLI you are already logged into —
+  default `http://127.0.0.1:1234`), or any agent CLI you are already logged into 
   no API key required in that case.
 - Clone the repositories you work in under your configured **clone parent dir**
   (default `~/repos`) so AutopilotV can resolve `<owner>/<repo>` →
@@ -158,17 +158,17 @@ If you'd rather not deal with Gatekeeper, build from source with `npm run dist`.
 ## Configuration
 
 Everything is configured in the app and stored in a local SQLite database under
-your OS app-data directory — there are no config files to edit:
+your OS app-data directory  there are no config files to edit:
 
-- **Appearance** — theme.
-- **Brain** — poll interval, max concurrent sessions, clone directory.
-- **GitHub** — username and watched repos.
-- **Tracker** — active adapter and its fields; per-project enable and repo mapping.
-- **LLM** — local endpoint/model or a brain harness, with a connectivity test.
-- **Dev line** — auto-publish drafts, required approvals, branch prefix, terminal.
-- **Auto-drive** — default-on, injection cap, destructive-command denylist.
-- **AGENTS.md template** — universal coding instructions injected per worktree.
-- **Harnesses** — enable and role defaults; Pi can opt out of the managed local model.
+- **Appearance**  theme.
+- **Brain**  poll interval, max concurrent sessions, clone directory.
+- **GitHub**  username and watched repos.
+- **Tracker**  active adapter and its fields; per-project enable and repo mapping.
+- **LLM**  local endpoint/model or a brain harness, with a connectivity test.
+- **Dev line**  auto-publish drafts, required approvals, branch prefix, terminal.
+- **Auto-drive**  default-on, injection cap, destructive-command denylist.
+- **AGENTS.md template**  universal coding instructions injected per worktree.
+- **Harnesses**  enable and role defaults; Pi can opt out of the managed local model.
 
 Secrets reuse your existing `gh`, tracker, and agent CLI logins; nothing sensitive
 is stored in the database or logs.
