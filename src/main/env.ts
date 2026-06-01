@@ -75,17 +75,17 @@ export async function checkEnvironment(): Promise<EnvItem[]> {
           : 'installed but not authenticated — run: acli jira auth login',
       install: 'developer.atlassian.com/cloud/acli'
     })
-  } else if (settings.tracker === 'shipreq') {
-    const ep = settings.trackerConfig?.shipreq?.endpoint ?? ''
-    const ok = ep ? await pingEndpoint(ep, '/api/health', 4000) : false
+  } else if (settings.tracker === 'vikunja') {
+    const ep = settings.trackerConfig?.vikunja?.endpoint ?? ''
+    const ok = ep ? await pingEndpoint(ep, '/api/v1/info', 4000) : false
     items.push({
-      id: 'shipreq',
-      label: 'ShipReq endpoint',
+      id: 'vikunja',
+      label: 'Vikunja endpoint',
       role: 'required',
       present: !!ep,
       authed: ep ? ok : null,
       detail: !ep ? 'no endpoint set in Tracker settings' : ok ? `reachable: ${ep}` : `unreachable: ${ep}`,
-      install: 'Point Tracker settings at your ShipReq instance'
+      install: 'Point Tracker settings at your Vikunja instance'
     })
   }
   // ghproject needs only gh, already checked.

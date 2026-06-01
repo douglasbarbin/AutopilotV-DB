@@ -1,12 +1,12 @@
 import type { Settings } from '@shared/types/domain'
 import type { ProjectTracker } from './types'
 import { jiraTracker } from './jira'
-import { shipreqTracker } from './shipreq'
+import { vikunjaTracker } from './vikunja'
 import { ghProjectTracker } from './ghproject'
 
 const REGISTRY: Record<string, ProjectTracker> = {
   jira: jiraTracker,
-  shipreq: shipreqTracker,
+  vikunja: vikunjaTracker,
   ghproject: ghProjectTracker
 }
 

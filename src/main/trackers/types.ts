@@ -1,5 +1,5 @@
 // Project-tracker adapter contract. Each adapter maps an external tracker
-// (Jira, ShipReq, …) to AutopilotV's neutral work-item shape.
+// (Jira, Vikunja, …) to AutopilotV's neutral work-item shape.
 
 export interface TrackerIssue {
   key: string

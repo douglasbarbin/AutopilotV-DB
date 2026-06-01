@@ -54,20 +54,31 @@ export const TRACKERS: TrackerDescriptor[] = [
     ]
   },
   {
-    id: 'shipreq',
-    displayName: 'ShipReq',
-    blurb:
-      'ShipReq (japgolly). ShipReq has no stable public API, so point this at your instance’s HTTP endpoint; the response mapping may need adjustment.',
+    id: 'vikunja',
+    displayName: 'Vikunja',
+    blurb: 'Vikunja open-source task tracker. Connects via the Vikunja REST API using a personal API token.',
     fields: [
-      { key: 'endpoint', label: 'Base URL', type: 'text', placeholder: 'http://localhost:8080' },
-      { key: 'token', label: 'API token', type: 'password' },
-      { key: 'project', label: 'Project id / slug', type: 'text' },
+      { key: 'endpoint', label: 'Base URL', type: 'text', placeholder: 'https://vikunja.example.com' },
       {
-        key: 'query',
-        label: 'Filter (optional)',
+        key: 'token',
+        label: 'API token',
+        type: 'password',
+        hint: 'Create one in Vikunja → Settings → API Tokens.'
+      },
+      {
+        key: 'projectId',
+        label: 'Project ID (optional)',
         type: 'text',
-        placeholder: 'assigned-to-me open'
+        hint: 'Limit tasks to a single project; leave blank for all assigned tasks.'
+      },
+      {
+        key: 'assigneeFilter',
+        label: 'Assignee username (optional)',
+        type: 'text',
+        hint: 'Filter tasks to this username; defaults to the authenticated user.'
       }
+    ]
+  }
     ]
   }
 ]

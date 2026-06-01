@@ -91,7 +91,7 @@ function Welcome() {
           <strong>git</strong> + <strong>GitHub CLI (gh)</strong> — required, for repos and PRs.
         </li>
         <li>
-          A <strong>project tracker</strong> — Jira (acli), GitHub Projects, or ShipReq.
+          A <strong>project tracker</strong> — Jira (acli), GitHub Projects, or Vikunja.
         </li>
         <li>
           At least one <strong>coding agent CLI</strong> — Claude Code is recommended; Pi, Codex,
