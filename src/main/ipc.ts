@@ -11,7 +11,13 @@ import { notifier } from './notify'
 import { buildState, pushState } from './state'
 import { startReview, actOnReview, approveOnly } from './review/orchestrator'
 import { pruneWorktree, discardWorktree } from './worktree/manager'
-import { startDevTask, publishDevTask, mergeDevTask, requestDevChanges } from './dev/orchestrator'
+import {
+  startDevTask,
+  delegateDevTask,
+  publishDevTask,
+  mergeDevTask,
+  requestDevChanges
+} from './dev/orchestrator'
 import { ensureLocalModel, stopLocalModel } from './localmodel/manager'
 import { setSecret } from './secrets'
 import { makeProvider } from './llm/provider'
@@ -31,6 +37,15 @@ export function registerIpc(): void {
       const task = store.getTask(ref.id)
       if (task) await startDevTask(task)
     }
+    pushState()
+  })
+
+  handle(Channels.workDelegate, async (ref: WorkRef, prNumber?: number) => {
+    if (ref.kind !== 'dev') return
+    // Take over even though the brain wouldn't auto-claim it (not a fresh To Do).
+    if (!store.claimWork('dev', ref.id, 'user')) return
+    const task = store.getTask(ref.id)
+    if (task) await delegateDevTask(task, prNumber)
     pushState()
   })
 

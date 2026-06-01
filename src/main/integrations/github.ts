@@ -205,6 +205,76 @@ export async function findPrForBranch(
   return { number: rows[0].number, url: rows[0].url, isDraft: rows[0].isDraft, state: rows[0].state }
 }
 
+/** A PR that an in-flight task can be handed off to ("take over"). */
+export interface AdoptablePr {
+  number: number
+  url: string
+  branch: string
+  isDraft: boolean
+  state: string // OPEN | CLOSED | MERGED
+  title: string
+}
+
+/** Fetch a PR by number with everything needed to adopt it, or null if absent. */
+export async function getAdoptablePr(repoNwo: string, number: number): Promise<AdoptablePr | null> {
+  const r = await exec('gh', [
+    'pr',
+    'view',
+    String(number),
+    '--repo',
+    repoNwo,
+    '--json',
+    'number,url,headRefName,isDraft,state,title'
+  ])
+  if (r.code !== 0) return null
+  const row = JSON.parse(r.stdout)
+  return {
+    number: row.number,
+    url: row.url,
+    branch: row.headRefName,
+    isDraft: row.isDraft,
+    state: row.state,
+    title: row.title
+  }
+}
+
+/**
+ * Best-effort discovery of an open PR that belongs to a tracker task, matched by
+ * the issue key appearing in the PR title/body or head branch. Returns the most
+ * recent match, or null. Used by "take over" when no PR number is supplied.
+ */
+export async function findPrForTask(repoNwo: string, jiraKey: string): Promise<AdoptablePr | null> {
+  if (!jiraKey) return null
+  const r = await exec('gh', [
+    'pr',
+    'list',
+    '--repo',
+    repoNwo,
+    '--search',
+    jiraKey,
+    '--state',
+    'open',
+    '--json',
+    'number,url,headRefName,isDraft,state,title',
+    '--limit',
+    '10'
+  ])
+  if (r.code !== 0) return null
+  const rows = JSON.parse(r.stdout || '[]') as any[]
+  const key = jiraKey.toLowerCase()
+  // Prefer a branch that carries the key; otherwise the first (most-recent) match.
+  const row = rows.find((x) => (x.headRefName ?? '').toLowerCase().includes(key)) ?? rows[0]
+  if (!row) return null
+  return {
+    number: row.number,
+    url: row.url,
+    branch: row.headRefName,
+    isDraft: row.isDraft,
+    state: row.state,
+    title: row.title
+  }
+}
+
 /** Mark a draft PR ready for review (publish). */
 export async function publishPr(repoNwo: string, number: number): Promise<void> {
   await execOrThrow('gh', ['pr', 'ready', String(number), '--repo', repoNwo])

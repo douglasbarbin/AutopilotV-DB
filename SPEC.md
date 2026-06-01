@@ -357,6 +357,11 @@ line is **not** sandboxed from `gh` (it must push and open PRs).
 ```
 unclaimed
   → (claim: brain auto-claims an enabled-project To Do, or you click Start)
+  → (take over: you click "Take over" on an in-flight item the brain won't auto-claim
+     — In Progress / In Review etc. AutopilotV adopts an existing PR (discovered by
+     issue key, or the number you hand it) and jumps straight to draft/in_review on a
+     worktree checked out to that PR's branch. With no PR to adopt it falls back to a
+     fresh implementation, exactly like Start.)
 implementing   — feature worktree + branch; Jira → In Progress; agent implements
                and opens a DRAFT PR, signalling completion by writing .pr-url
 draft          — PR detected; awaits publish
@@ -435,9 +440,10 @@ Settings**, with badge counts and a live "tick #N · Ns ago" status + Tick-now.
 
 - **Work queue** — _PRs awaiting my review_ (Review / Approve-only / Retry on error)
   and _Tasks assigned to me_ showing the real tracker status while unclaimed and the
-  AutopilotV phase once driving. Per-task actions by phase: Start, Publish, Request
-  changes, Merge, Reset/Retry, **Terminal**, plus a PR link. A project chip bar
-  filters by project (epics excluded).
+  AutopilotV phase once driving. Per-task actions by phase: Start, **Take over** (for
+  in-flight items not in To Do — optionally with an explicit PR # to adopt), Publish,
+  Request changes, Merge, Reset/Retry, **Terminal**, plus a PR link. A project chip
+  bar filters by project (epics excluded).
 - **Session grid** — one xterm.js terminal per live session, replayed from the
   captured buffer on view; per-session **auto-drive** toggle; kill.
 - **Review cards** — summary + findings + **Approve · Approve only · Request
@@ -498,7 +504,7 @@ and sends intents. `contextIsolation: true`, `nodeIntegration: false`, a narrow
 A single typed, versioned bridge exposed via `preload`. Three channel kinds:
 
 - **Commands** (renderer → main, request/response): `work.claim(id)`,
-  `work.skip(id)`, `review.act(reviewId, action)`, `session.spawn/kill(id)`,
+  `work.delegate(id, prNumber?)`, `work.skip(id)`, `review.act(reviewId, action)`, `session.spawn/kill(id)`,
   `session.sendInput(id, data)`, `harness.upsert(cfg)`, `settings.update(patch)`,
   `localModel.start/stop(id)`.
 - **Streams** (main → renderer, push): `session.output(id, chunk)` (PTY data,

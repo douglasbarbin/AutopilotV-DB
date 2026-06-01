@@ -132,12 +132,22 @@ function TaskRow({ task, autoPublish }: { task: JiraTask; autoPublish: boolean }
     ? (phaseMeta?.color ?? 'var(--comment)')
     : (STATUS_META[task.status]?.color ?? 'var(--comment)')
   const claimable = task.phase === 'unclaimed' && task.status === 'todo'
+  // Take over anything in flight (In Progress / In Review) that AutopilotV isn't already driving.
+  const takeoverable = task.phase === 'unclaimed' && task.status !== 'todo' && task.status !== 'done'
   const [requesting, setRequesting] = useState(false)
   const [text, setText] = useState('')
+  const [takingOver, setTakingOver] = useState(false)
+  const [prNum, setPrNum] = useState('')
   const submitRequest = () => {
     if (text.trim()) void api.requestDevChanges(task.id, text)
     setText('')
     setRequesting(false)
+  }
+  const submitTakeover = () => {
+    const n = prNum.trim() ? Number(prNum.trim()) : undefined
+    void api.delegate({ kind: 'dev', id: task.id }, n)
+    setPrNum('')
+    setTakingOver(false)
   }
   return (
     <div className={`card work-item task-card ${task.phase === 'error' ? 'errored' : ''}`}>
@@ -174,6 +184,20 @@ function TaskRow({ task, autoPublish }: { task: JiraTask; autoPublish: boolean }
           <>
             <button className="btn-primary" onClick={() => void api.claim({ kind: 'dev', id: task.id })}>
               Start
+            </button>
+            <button className="btn-ghost" onClick={() => void api.skip({ kind: 'dev', id: task.id })}>
+              Skip
+            </button>
+          </>
+        )}
+        {takeoverable && (
+          <>
+            <button
+              className="btn-primary"
+              title="Claim this in-flight task — adopts its PR if one exists"
+              onClick={() => setTakingOver((v) => !v)}
+            >
+              Take over
             </button>
             <button className="btn-ghost" onClick={() => void api.skip({ kind: 'dev', id: task.id })}>
               Skip
@@ -225,6 +249,32 @@ function TaskRow({ task, autoPublish }: { task: JiraTask; autoPublish: boolean }
         )}
       </div>
       </div>
+      {takingOver && (
+        <div className="request-form takeover-form">
+          <label className="takeover-label">
+            Take over {task.jiraKey} (Jira: {task.jiraStatus || task.status}). AutopilotV adopts an
+            existing PR if it can find one — give it a number below to be explicit.
+          </label>
+          <input
+            className="pr-input"
+            type="text"
+            inputMode="numeric"
+            autoFocus
+            value={prNum}
+            placeholder="PR # to adopt (optional — leave blank to auto-detect)"
+            onChange={(e) => setPrNum(e.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={(e) => e.key === 'Enter' && submitTakeover()}
+          />
+          <div className="request-actions">
+            <button className="btn-primary" onClick={submitTakeover}>
+              Take over
+            </button>
+            <button className="btn-ghost" onClick={() => { setTakingOver(false); setPrNum('') }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {requesting && (
         <div className="request-form">
           <textarea

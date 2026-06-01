@@ -145,6 +145,40 @@ export async function provisionDevWorktree(repo: Repo, branch: string): Promise<
 }
 
 /**
+ * Provision a dev worktree on an EXISTING remote branch (used when taking over a
+ * task whose PR was opened elsewhere). Unlike provisionDevWorktree this does not
+ * branch off the default branch — it fetches the PR's head branch and checks it
+ * out so the dev line can push follow-up commits to the same PR.
+ */
+export async function provisionDevWorktreeForBranch(repo: Repo, branch: string): Promise<Worktree> {
+  if (!repo.path) throw new Error(`repo ${repo.name} not cloned locally`)
+  const cwd = repo.path
+  const safe = branch.replace(/[^A-Za-z0-9._/-]/g, '-')
+  const dest = join(worktreeRoot(repo), `adopt__${safe.replace(/\//g, '__')}`)
+
+  // Self-heal any stale tree from a prior attempt at this path.
+  if (existsSync(dest)) await exec('git', ['worktree', 'remove', '--force', dest], { cwd })
+  await exec('git', ['worktree', 'prune'], { cwd })
+
+  log.info('fetching branch for takeover', { repo: repo.name, branch })
+  await execOrThrow('git', ['fetch', 'origin', `${branch}:refs/remotes/origin/${branch}`], {
+    cwd
+  }).catch(async () => {
+    await execOrThrow('git', ['fetch', 'origin', branch], { cwd })
+  })
+
+  // -B creates or resets a local branch tracking the fetched head, checked out in dest.
+  await execOrThrow('git', ['worktree', 'add', '--force', '-B', branch, dest, `origin/${branch}`], {
+    cwd
+  })
+  await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
+  await addToGitExclude(dest, ['.pr-url', '.revise', '.address-comments'])
+  const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
+  store.recordEvent('worktree.provisioned', { repo: repo.name, branch, path: dest, adopted: true })
+  return store.getWorktree(id)!
+}
+
+/**
  * Prune a worktree. Guard: never force-destroy unexpected uncommitted changes
  * for dev worktrees; review worktrees are read-only so are safe to force-remove.
  */

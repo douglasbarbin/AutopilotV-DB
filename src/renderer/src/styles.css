@@ -649,6 +649,24 @@ button {
   display: flex;
   gap: 8px;
 }
+.takeover-label {
+  color: var(--comment);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.request-form .pr-input {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  font-family: inherit;
+  font-size: 12.5px;
+}
+.request-form .pr-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;

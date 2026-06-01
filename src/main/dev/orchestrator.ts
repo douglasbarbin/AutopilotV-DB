@@ -3,7 +3,7 @@ import { join } from 'path'
 import { log } from '../log'
 import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
-import { provisionDevWorktree, pruneWorktree } from '../worktree/manager'
+import { provisionDevWorktree, provisionDevWorktreeForBranch, pruneWorktree } from '../worktree/manager'
 import * as gh from '../integrations/github'
 import { notifier } from '../notify'
 import { activeTracker } from '../trackers'
@@ -131,6 +131,89 @@ export async function startDevTask(task: JiraTask): Promise<number | null> {
   store.attachSessionToWork('dev', task.id, sessionId)
   note('dev', `Claimed ${task.jiraKey} and started implementation in ${repo.name}.`, { key: task.jiraKey })
   return sessionId
+}
+
+/**
+ * Take over (delegate) an in-flight task that the brain won't auto-claim because
+ * it isn't a fresh "To Do" item. Resolves a PR to adopt — an explicit number wins,
+ * otherwise it tries to discover one by the issue key — and jumps the task straight
+ * into the matching phase (draft awaiting publish, or in_review babysitting) on a
+ * worktree checked out to the PR's branch. With no PR to adopt it falls back to a
+ * fresh implementation, exactly like a normal claim.
+ */
+export async function delegateDevTask(task: JiraTask, prNumberHint?: number): Promise<void> {
+  const { repo, reason } = pickDevRepo(task)
+  if (!repo) {
+    note('dev', `Can't take over ${task.jiraKey} — ${reason}.`, { key: task.jiraKey }, 'warn')
+    store.setTaskPhase(task.id, 'error')
+    store.setClaimState('dev', task.id, 'error')
+    return
+  }
+
+  // Resolve the PR to adopt: an explicit number wins, else discover by issue key.
+  let pr: gh.AdoptablePr | null = null
+  if (prNumberHint) {
+    pr = await gh.getAdoptablePr(repo.name, prNumberHint)
+    if (!pr) {
+      note(
+        'dev',
+        `PR #${prNumberHint} not found in ${repo.name} — taking over ${task.jiraKey} with a fresh branch instead.`,
+        { key: task.jiraKey },
+        'warn'
+      )
+    }
+  } else {
+    pr = await gh.findPrForTask(repo.name, task.jiraKey)
+    if (pr) note('dev', `Found existing PR #${pr.number} for ${task.jiraKey} — adopting it.`, { key: task.jiraKey })
+  }
+
+  // No open PR to adopt → take over by implementing from scratch.
+  if (!pr || pr.state !== 'OPEN') {
+    if (pr && pr.state !== 'OPEN') {
+      note(
+        'dev',
+        `PR #${pr.number} for ${task.jiraKey} is ${pr.state.toLowerCase()} — taking over with a fresh branch.`,
+        { key: task.jiraKey },
+        'warn'
+      )
+    }
+    await startDevTask(task)
+    return
+  }
+
+  // Adopt the existing PR: worktree on its branch, jump to the right phase.
+  let worktree
+  try {
+    worktree = await provisionDevWorktreeForBranch(repo, pr.branch)
+  } catch (err) {
+    log.error('takeover worktree provision failed', { taskId: task.id, err: String(err) })
+    note('dev', `Couldn't check out PR #${pr.number}'s branch for ${task.jiraKey}: ${String(err).slice(0, 80)}`, {}, 'warn')
+    store.setTaskPhase(task.id, 'error')
+    store.setClaimState('dev', task.id, 'error')
+    return
+  }
+
+  store.setTaskRepo(task.id, repo.id)
+  store.setTaskWorktree(task.id, worktree.id)
+  store.setTaskPr(task.id, pr.number, pr.url)
+  const phase = pr.isDraft ? 'draft' : 'in_review'
+  store.setTaskPhase(task.id, phase)
+  store.setTaskStatus(task.id, pr.isDraft ? 'in_progress' : 'in_review')
+  store.setClaimState('dev', task.id, 'in_progress')
+  store.recordEvent('dev.delegated', {
+    taskId: task.id,
+    prNumber: pr.number,
+    phase,
+    viaHint: !!prNumberHint
+  })
+  note(
+    'dev',
+    `Took over ${task.jiraKey} on PR #${pr.number} — ${
+      pr.isDraft ? 'a draft awaiting publish' : 'babysitting review'
+    }.`,
+    { key: task.jiraKey }
+  )
+  // No session spawned now; advanceDevTasks drives it from here (publish / babysit).
 }
 
 /**

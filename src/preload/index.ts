@@ -7,6 +7,8 @@ const api: AutopilotVApi = {
   version: IPC_VERSION,
   snapshot: () => ipcRenderer.invoke(Channels.stateSnapshot) as Promise<AppState>,
   claim: (ref: WorkRef) => ipcRenderer.invoke(Channels.workClaim, ref) as Promise<void>,
+  delegate: (ref: WorkRef, prNumber?: number) =>
+    ipcRenderer.invoke(Channels.workDelegate, ref, prNumber) as Promise<void>,
   skip: (ref: WorkRef) => ipcRenderer.invoke(Channels.workSkip, ref) as Promise<void>,
   reviewAct: (reviewId: number, action: ReviewAction) =>
     ipcRenderer.invoke(Channels.reviewAct, reviewId, action) as Promise<void>,

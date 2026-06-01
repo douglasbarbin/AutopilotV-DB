@@ -13,6 +13,7 @@ export const Channels = {
   // commands (renderer -> main, invoke/handle)
   stateSnapshot: 'state.snapshot',
   workClaim: 'work.claim',
+  workDelegate: 'work.delegate',
   workSkip: 'work.skip',
   reviewAct: 'review.act',
   reviewReset: 'review.reset',
@@ -82,6 +83,8 @@ export interface AutopilotVApi {
   version: number
   snapshot(): Promise<AppState>
   claim(ref: WorkRef): Promise<void>
+  /** Take over an in-flight (non-To-Do) task, optionally adopting a specific PR. */
+  delegate(ref: WorkRef, prNumber?: number): Promise<void>
   skip(ref: WorkRef): Promise<void>
   reviewAct(reviewId: number, action: ReviewAction): Promise<void>
   resetReview(prReviewId: number): Promise<void>
