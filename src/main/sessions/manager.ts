@@ -90,11 +90,20 @@ export class SessionManager extends EventEmitter {
     }
 
     const proc = pty.spawn(opts.harness.launch.command, args, {
-      name: 'xterm-color',
+      name: 'xterm-256color',
       cols: 120,
       rows: 32,
       cwd: opts.cwd,
-      env: { ...opts.env, ...lmEnv, ...(opts.harness.launch.env ?? {}) } as { [k: string]: string }
+      env: {
+        ...opts.env,
+        // Advertise full 24-bit truecolor support so tools like bat, delta,
+        // lazygit, rich, etc. render with their full color output without
+        // needing any extra user configuration.
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+        ...lmEnv,
+        ...(opts.harness.launch.env ?? {})
+      } as { [k: string]: string }
     })
 
     const transcriptPath = join(this.transcriptsDir, `session-${sessionId}.log`)

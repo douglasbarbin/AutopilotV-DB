@@ -812,7 +812,7 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  background: #232323;
+  background: var(--bg-sidebar);
 }
 .session-toolbar {
   display: flex;
@@ -855,7 +855,7 @@ button:disabled {
 .terminal {
   flex: 1;
   padding: 8px;
-  background: #232323;
+  background: var(--bg-sidebar);
   min-height: 420px;
 }
 

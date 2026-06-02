@@ -12,7 +12,7 @@ const STATUS_COLOR: Record<string, string> = {
   killed: 'var(--comment)'
 }
 
-export function SessionGrid({ sessions }: { sessions: Session[] }) {
+export function SessionGrid({ sessions, theme }: { sessions: Session[]; theme: string }) {
   const active = sessions.filter((s) =>
     ['starting', 'running', 'stalled', 'needs_human'].includes(s.status)
   )
@@ -62,7 +62,7 @@ export function SessionGrid({ sessions }: { sessions: Session[] }) {
               </button>
             </div>
           </div>
-          <TerminalView key={focusedSession.id} sessionId={focusedSession.id} />
+          <TerminalView key={focusedSession.id} sessionId={focusedSession.id} theme={theme} />
         </div>
       )}
     </div>

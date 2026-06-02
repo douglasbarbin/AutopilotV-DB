@@ -160,7 +160,7 @@ export function App() {
 
         <main className="page">
           {tab === 'work' && <WorkQueue state={state} />}
-          {tab === 'sessions' && <SessionGrid sessions={state.sessions} />}
+          {tab === 'sessions' && <SessionGrid sessions={state.sessions} theme={state.settings.theme} />}
           {tab === 'reviews' && <ReviewCards state={state} />}
           {tab === 'brain' && <BrainPanel state={state} />}
           {tab === 'events' && <EventsLog state={state} />}
