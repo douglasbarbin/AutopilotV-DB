@@ -79,8 +79,6 @@ export const TRACKERS: TrackerDescriptor[] = [
       }
     ]
   }
-    ]
-  }
 ]
 
 export function trackerDescriptor(id: string): TrackerDescriptor | undefined {
