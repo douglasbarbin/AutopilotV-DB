@@ -47,19 +47,14 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
 
-      # On Windows, the node-gyp that ends up in node_modules (via transitive deps)
-      # may be too old to locate VS 2022+ with vswhere. Split the install:
-      #   1. npm ci --ignore-scripts  — installs packages without the postinstall
-      #      native rebuild (electron-builder install-app-deps).
-      #   2. Upgrade node-gyp in-place so @electron/rebuild uses a VS-aware version.
-      #   3. Run the native rebuild explicitly with the updated node-gyp.
+      # On Windows, node-gyp's VS auto-discovery (vswhere) is unreliable on
+      # GitHub-hosted runners. Setting npm_config_msvs_version tells node-gyp
+      # exactly which VS version to use, bypassing the broken detection path.
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          npm ci --ignore-scripts
-          npm install --no-save --no-package-lock node-gyp@latest
-          npx electron-builder install-app-deps
+        env:
+          npm_config_msvs_version: '2022'
+        run: npm ci
       - name: Install deps (non-Windows)
         if: runner.os != 'Windows'
         run: npm ci
