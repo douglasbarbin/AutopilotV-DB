@@ -34,14 +34,22 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
 
-      # On Windows, node-gyp's VS auto-discovery (vswhere) is unreliable on
-      # GitHub-hosted runners. Setting npm_config_msvs_version tells node-gyp
-      # exactly which VS version to use, bypassing the broken detection path.
+      # On Windows, @electron/rebuild vendors node-gyp@^9 which has a broken
+      # vswhere parser on current GitHub runners. Fix:
+      #  1. npm ci --ignore-scripts — skip postinstall (native rebuild)
+      #  2. Upgrade top-level node-gyp to latest (v12, VS-2022/2025-aware)
+      #  3. Delete the ^9 copy npm nests under @electron/rebuild — after
+      #     deletion, require('node-gyp') from @electron/rebuild walks up to
+      #     the upgraded top-level copy.
+      #  4. Run the native rebuild explicitly with the modern node-gyp.
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
-        env:
-          npm_config_msvs_version: '2022'
-        run: npm ci
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          npm install --no-save node-gyp@latest
+          Remove-Item -Recurse -Force node_modules\@electron\rebuild\node_modules\node-gyp -ErrorAction SilentlyContinue
+          npx electron-builder install-app-deps
       - name: Install deps (non-Windows)
         if: runner.os != 'Windows'
         run: npm ci
