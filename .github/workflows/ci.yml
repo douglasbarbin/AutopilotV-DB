@@ -46,17 +46,24 @@ jobs:
       - name: Install Linux native build deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
-      - name: Set up Windows native build tools
+
+      # On Windows, the node-gyp that ends up in node_modules (via transitive deps)
+      # may be too old to locate VS 2022+ with vswhere. Split the install:
+      #   1. npm ci --ignore-scripts  — installs packages without the postinstall
+      #      native rebuild (electron-builder install-app-deps).
+      #   2. Upgrade node-gyp in-place so @electron/rebuild uses a VS-aware version.
+      #   3. Run the native rebuild explicitly with the updated node-gyp.
+      - name: Install deps (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # The node-gyp bundled with node-pty may not recognise newer Visual
-          # Studio installations (2022+). Install a current global copy and point
-          # npm at it so @electron/rebuild uses a VS-aware gyp for native rebuilds.
-          npm install -g node-gyp@latest
-          $gyp = Join-Path (npm root -g) "node-gyp" "bin" "node-gyp.js"
-          npm config set node_gyp $gyp
-      - run: npm ci
+          npm ci --ignore-scripts
+          npm install --no-save --no-package-lock node-gyp@latest
+          npx electron-builder install-app-deps
+      - name: Install deps (non-Windows)
+        if: runner.os != 'Windows'
+        run: npm ci
+
       - run: npm run build
       - name: Package
         run: npx electron-builder --publish never
