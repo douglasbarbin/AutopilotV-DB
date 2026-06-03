@@ -55,6 +55,15 @@ jobs:
         if: runner.os != 'Windows'
         run: npm ci
 
+      # electron-builder names the GitHub Release after package.json's version,
+      # which is pinned at 1.0.0. Stamp it from the pushed tag (v1.2.0 -> 1.2.0)
+      # so the release matches the tag. bash runs on all three runners (Git Bash
+      # on Windows). --no-git-tag-version: don't commit/tag; --allow-same-version:
+      # tolerate a tag that already equals package.json.
+      - name: Set version from tag
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
