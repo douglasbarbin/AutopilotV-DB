@@ -701,7 +701,7 @@ button:disabled {
 .work-item.errored {
   border-color: rgba(242, 119, 122, 0.4);
 }
-.jira-status {
+.tracker-status {
   color: var(--comment);
 }
 .pr-link {

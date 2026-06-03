@@ -3,12 +3,17 @@ import { join } from 'path'
 import { log } from '../log'
 import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
-import { provisionDevWorktree, provisionDevWorktreeForBranch, pruneWorktree } from '../worktree/manager'
+import {
+  provisionDevWorktree,
+  provisionDevWorktreeForBranch,
+  pruneWorktree,
+  discardWorktree
+} from '../worktree/manager'
 import * as gh from '../integrations/github'
 import { notifier } from '../notify'
 import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
-import type { JiraTask, Repo, Settings } from '@shared/types/domain'
+import type { TrackerTask, Repo, Settings } from '@shared/types/domain'
 
 const PR_URL_FILE = '.pr-url'
 const REVISE_FILE = '.revise'
@@ -43,7 +48,7 @@ function note(category: 'dev', message: string, detail?: Record<string, unknown>
  * Pick the repo a dev task targets. A project→repo mapping (if set) wins;
  * otherwise fall back to a watched, locally-cloned repo.
  */
-function pickDevRepo(task: JiraTask): { repo: Repo | null; reason?: string } {
+function pickDevRepo(task: TrackerTask): { repo: Repo | null; reason?: string } {
   const mapped = store.resolveProjectRepo(task.projectKey)
   if (mapped) {
     if (mapped.cloneState === 'present') return { repo: mapped }
@@ -58,7 +63,7 @@ function pickDevRepo(task: JiraTask): { repo: Repo | null; reason?: string } {
   return { repo: repos.find((r) => watched.has(r.name)) ?? repos[0] }
 }
 
-function isTaskSessionActive(task: JiraTask): boolean {
+function isTaskSessionActive(task: TrackerTask): boolean {
   if (!task.sessionId) return false
   const s = store.getSession(task.sessionId)
   return !!s && ['starting', 'running', 'stalled', 'needs_human'].includes(s.status) && sessionManager.isLive(s.id)
@@ -68,10 +73,10 @@ function isTaskSessionActive(task: JiraTask): boolean {
  * Claim → implement: create a feature worktree/branch and spawn the dev harness
  * with a prompt to implement the task and open a DRAFT PR. Sets phase=implementing.
  */
-export async function startDevTask(task: JiraTask): Promise<number | null> {
+export async function startDevTask(task: TrackerTask): Promise<number | null> {
   const { repo, reason } = pickDevRepo(task)
   if (!repo) {
-    note('dev', `Can't start ${task.jiraKey} — ${reason}.`, { key: task.jiraKey }, 'warn')
+    note('dev', `Can't start ${task.issueKey} — ${reason}.`, { key: task.issueKey }, 'warn')
     store.setTaskPhase(task.id, 'error')
     store.setClaimState('dev', task.id, 'error')
     return null
@@ -84,13 +89,13 @@ export async function startDevTask(task: JiraTask): Promise<number | null> {
   }
 
   const prefix = (store.getSettings().branchPrefix || 'autopilotv/').replace(/\/*$/, '/')
-  const branch = `${prefix}${task.jiraKey}-${slug(task.title)}`
+  const branch = `${prefix}${task.issueKey}-${slug(task.title)}`
   let worktree
   try {
     worktree = await provisionDevWorktree(repo, branch)
   } catch (err) {
     log.error('dev worktree provision failed', { taskId: task.id, err: String(err) })
-    note('dev', `Couldn't create a worktree for ${task.jiraKey}: ${String(err).slice(0, 80)}`, {}, 'warn')
+    note('dev', `Couldn't create a worktree for ${task.issueKey}: ${String(err).slice(0, 80)}`, {}, 'warn')
     store.setTaskPhase(task.id, 'error')
     store.setClaimState('dev', task.id, 'error')
     return null
@@ -102,14 +107,14 @@ export async function startDevTask(task: JiraTask): Promise<number | null> {
 
   try {
     const { tracker, config } = activeTracker(store.getSettings())
-    await tracker.transition(task.jiraKey, 'In Progress', config)
+    await tracker.transition(task.issueKey, 'In Progress', config)
     store.setTaskStatus(task.id, 'in_progress')
   } catch (err) {
-    log.warn('tracker transition to In Progress failed', { key: task.jiraKey, err: String(err) })
+    log.warn('tracker transition to In Progress failed', { key: task.issueKey, err: String(err) })
   }
 
   const prompt =
-    `You are implementing Jira task ${task.jiraKey}: "${task.title}".\n` +
+    `You are implementing tracker task ${task.issueKey}: "${task.title}".\n` +
     `Work in this worktree on branch ${branch}. Implement the change, commit it, then open a ` +
     `DRAFT pull request against ${repo.defaultBranch} with \`gh pr create --draft\`. ` +
     `Only open the PR once the implementation is complete. ` +
@@ -124,12 +129,12 @@ export async function startDevTask(task: JiraTask): Promise<number | null> {
     cwd: worktree.path,
     env: process.env,
     worktreeId: worktree.id,
-    title: `${task.jiraKey} ${task.title}`.slice(0, 80),
+    title: `${task.issueKey} ${task.title}`.slice(0, 80),
     initialInput: prompt
   })
   store.attachWorktreeSession(worktree.id, sessionId)
   store.attachSessionToWork('dev', task.id, sessionId)
-  note('dev', `Claimed ${task.jiraKey} and started implementation in ${repo.name}.`, { key: task.jiraKey })
+  note('dev', `Claimed ${task.issueKey} and started implementation in ${repo.name}.`, { key: task.issueKey })
   return sessionId
 }
 
@@ -141,10 +146,10 @@ export async function startDevTask(task: JiraTask): Promise<number | null> {
  * worktree checked out to the PR's branch. With no PR to adopt it falls back to a
  * fresh implementation, exactly like a normal claim.
  */
-export async function delegateDevTask(task: JiraTask, prNumberHint?: number): Promise<void> {
+export async function delegateDevTask(task: TrackerTask, prNumberHint?: number): Promise<void> {
   const { repo, reason } = pickDevRepo(task)
   if (!repo) {
-    note('dev', `Can't take over ${task.jiraKey} — ${reason}.`, { key: task.jiraKey }, 'warn')
+    note('dev', `Can't take over ${task.issueKey} — ${reason}.`, { key: task.issueKey }, 'warn')
     store.setTaskPhase(task.id, 'error')
     store.setClaimState('dev', task.id, 'error')
     return
@@ -157,14 +162,14 @@ export async function delegateDevTask(task: JiraTask, prNumberHint?: number): Pr
     if (!pr) {
       note(
         'dev',
-        `PR #${prNumberHint} not found in ${repo.name} — taking over ${task.jiraKey} with a fresh branch instead.`,
-        { key: task.jiraKey },
+        `PR #${prNumberHint} not found in ${repo.name} — taking over ${task.issueKey} with a fresh branch instead.`,
+        { key: task.issueKey },
         'warn'
       )
     }
   } else {
-    pr = await gh.findPrForTask(repo.name, task.jiraKey)
-    if (pr) note('dev', `Found existing PR #${pr.number} for ${task.jiraKey} — adopting it.`, { key: task.jiraKey })
+    pr = await gh.findPrForTask(repo.name, task.issueKey)
+    if (pr) note('dev', `Found existing PR #${pr.number} for ${task.issueKey} — adopting it.`, { key: task.issueKey })
   }
 
   // No open PR to adopt → take over by implementing from scratch.
@@ -172,8 +177,8 @@ export async function delegateDevTask(task: JiraTask, prNumberHint?: number): Pr
     if (pr && pr.state !== 'OPEN') {
       note(
         'dev',
-        `PR #${pr.number} for ${task.jiraKey} is ${pr.state.toLowerCase()} — taking over with a fresh branch.`,
-        { key: task.jiraKey },
+        `PR #${pr.number} for ${task.issueKey} is ${pr.state.toLowerCase()} — taking over with a fresh branch.`,
+        { key: task.issueKey },
         'warn'
       )
     }
@@ -187,7 +192,7 @@ export async function delegateDevTask(task: JiraTask, prNumberHint?: number): Pr
     worktree = await provisionDevWorktreeForBranch(repo, pr.branch)
   } catch (err) {
     log.error('takeover worktree provision failed', { taskId: task.id, err: String(err) })
-    note('dev', `Couldn't check out PR #${pr.number}'s branch for ${task.jiraKey}: ${String(err).slice(0, 80)}`, {}, 'warn')
+    note('dev', `Couldn't check out PR #${pr.number}'s branch for ${task.issueKey}: ${String(err).slice(0, 80)}`, {}, 'warn')
     store.setTaskPhase(task.id, 'error')
     store.setClaimState('dev', task.id, 'error')
     return
@@ -208,10 +213,10 @@ export async function delegateDevTask(task: JiraTask, prNumberHint?: number): Pr
   })
   note(
     'dev',
-    `Took over ${task.jiraKey} on PR #${pr.number} — ${
+    `Took over ${task.issueKey} on PR #${pr.number} — ${
       pr.isDraft ? 'a draft awaiting publish' : 'babysitting review'
     }.`,
-    { key: task.jiraKey }
+    { key: task.issueKey }
   )
   // No session spawned now; advanceDevTasks drives it from here (publish / babysit).
 }
@@ -227,14 +232,14 @@ export async function requestDevChanges(taskId: number, instructions: string): P
   const repo = task.repoId ? store.getRepo(task.repoId) : null
   const worktree = task.worktreeId ? store.getWorktree(task.worktreeId) : null
   if (!repo || !worktree) {
-    note('dev', `Can't request changes for ${task.jiraKey} — its worktree is gone.`, {}, 'warn')
+    note('dev', `Can't request changes for ${task.issueKey} — its worktree is gone.`, {}, 'warn')
     return
   }
   const harness = store.getCodingHarness()
   if (!harness || !instructions.trim()) return
 
   const prompt =
-    `Additional change request for ${task.jiraKey}${task.prNumber ? ` (PR #${task.prNumber})` : ''}:\n\n` +
+    `Additional change request for ${task.issueKey}${task.prNumber ? ` (PR #${task.prNumber})` : ''}:\n\n` +
     `${instructions.trim()}\n\n` +
     `Make these changes in this worktree on branch ${worktree.branch}, commit, and push to update ` +
     `the existing PR. Do NOT open a new PR. ` +
@@ -249,13 +254,13 @@ export async function requestDevChanges(taskId: number, instructions: string): P
     cwd: worktree.path,
     env: process.env,
     worktreeId: worktree.id,
-    title: `${task.jiraKey} revise`.slice(0, 80),
+    title: `${task.issueKey} revise`.slice(0, 80),
     initialInput: prompt
   })
   store.attachSessionToWork('dev', task.id, sessionId)
   store.setTaskPhase(task.id, 'revising')
   store.recordEvent('dev.changes_requested', { taskId, prNumber: task.prNumber })
-  note('dev', `${task.jiraKey}: revising draft per your request.`, { key: task.jiraKey })
+  note('dev', `${task.issueKey}: revising draft per your request.`, { key: task.issueKey })
 }
 
 /** Publish a draft PR (auto or user-initiated) → in_review. */
@@ -268,13 +273,13 @@ export async function publishDevTask(taskId: number): Promise<void> {
   store.setTaskPhase(taskId, 'in_review')
   try {
     const { tracker, config } = activeTracker(store.getSettings())
-    await tracker.transition(task.jiraKey, 'In Review', config)
+    await tracker.transition(task.issueKey, 'In Review', config)
     store.setTaskStatus(taskId, 'in_review')
   } catch (err) {
-    log.warn('tracker transition to In Review failed', { key: task.jiraKey, err: String(err) })
+    log.warn('tracker transition to In Review failed', { key: task.issueKey, err: String(err) })
   }
   store.recordEvent('dev.published', { taskId, prNumber: task.prNumber })
-  note('dev', `Published PR #${task.prNumber} for ${task.jiraKey} — now in review.`, { key: task.jiraKey })
+  note('dev', `Published PR #${task.prNumber} for ${task.issueKey} — now in review.`, { key: task.issueKey })
 }
 
 /** Merge a PR (user-initiated), then finish. */
@@ -288,8 +293,8 @@ export async function mergeDevTask(taskId: number): Promise<void> {
   await finishMerged(task)
 }
 
-/** PR merged → stop tracking. Prune the worktree; do NOT touch Jira (QA owns Done). */
-async function finishMerged(task: JiraTask): Promise<void> {
+/** PR merged → stop tracking. Prune the worktree; do NOT touch the tracker (QA owns Done). */
+async function finishMerged(task: TrackerTask): Promise<void> {
   if (task.sessionId && sessionManager.isLive(task.sessionId)) {
     sessionManager.kill(task.sessionId, 'pr merged')
   }
@@ -297,9 +302,29 @@ async function finishMerged(task: JiraTask): Promise<void> {
     const wt = store.getWorktree(task.worktreeId)
     if (wt && !wt.prunedAt) await pruneWorktree(wt)
   }
-  store.setTaskPhase(task.id, 'done')
-  store.setClaimState('dev', task.id, 'done')
-  note('dev', `PR #${task.prNumber} for ${task.jiraKey} merged — done, no longer tracking.`, { key: task.jiraKey })
+  // Completes the task and freezes its current tracker status; if the tracker
+  // later moves it back to To Do (a QA bounce), the brain re-queues it (see
+  // store.upsertTask reopen detection + brain.refreshWork).
+  store.completeTask(task.id)
+  note('dev', `PR #${task.prNumber} for ${task.issueKey} merged — done, no longer tracking.`, { key: task.issueKey })
+}
+
+/**
+ * Tear a dev task all the way back to unclaimed: kill its session, discard the
+ * (possibly dirty) worktree + branch, and clear its workflow columns. Shared by
+ * the user's Reset action and the brain's auto-reopen of a bounced-back task.
+ */
+export async function resetDevTask(taskId: number, eventKind = 'dev.reset'): Promise<void> {
+  const task = store.getTask(taskId)
+  if (task?.sessionId && sessionManager.isLive(task.sessionId)) {
+    sessionManager.kill(task.sessionId, 'dev reset')
+  }
+  if (task?.worktreeId) {
+    const wt = store.getWorktree(task.worktreeId)
+    if (wt && !wt.prunedAt) await discardWorktree(wt)
+  }
+  store.resetTask(taskId)
+  store.recordEvent(eventKind, { taskId })
 }
 
 /**
@@ -319,7 +344,7 @@ export async function advanceDevTasks(settings: Settings): Promise<void> {
   }
 }
 
-async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
+async function advanceOne(task: TrackerTask, settings: Settings): Promise<void> {
   const repo = task.repoId ? store.getRepo(task.repoId) : null
   const worktree = task.worktreeId ? store.getWorktree(task.worktreeId) : null
   if (!repo) return
@@ -336,18 +361,18 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
       if (task.sessionId && sessionManager.isLive(task.sessionId)) {
         sessionManager.kill(task.sessionId, 'draft PR opened')
       }
-      note('dev', `${task.jiraKey} opened draft PR #${pr.number}${fromFile ? ' (via .pr-url)' : ''}.`, {
-        key: task.jiraKey
+      note('dev', `${task.issueKey} opened draft PR #${pr.number}${fromFile ? ' (via .pr-url)' : ''}.`, {
+        key: task.issueKey
       })
       return
     }
     // No PR yet. If the implementing session died, it failed to produce one.
     if (!isTaskSessionActive(task)) {
       store.setTaskPhase(task.id, 'error')
-      note('dev', `${task.jiraKey} implementation ended without opening a PR — needs a human.`, {}, 'warn')
+      note('dev', `${task.issueKey} implementation ended without opening a PR — needs a human.`, {}, 'warn')
       notifier.notify({
         kind: 'needs_human',
-        title: `Dev task needs you — ${task.jiraKey}`,
+        title: `Dev task needs you — ${task.issueKey}`,
         body: 'Implementation finished without opening a PR.',
         deepLink: { type: 'task', id: task.id }
       })
@@ -365,7 +390,7 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
       if (task.sessionId && sessionManager.isLive(task.sessionId)) {
         sessionManager.kill(task.sessionId, 'revision complete')
       }
-      let next: JiraTask['phase'] = 'draft'
+      let next: TrackerTask['phase'] = 'draft'
       if (worktree && task.prNumber) {
         const pr = await gh.findPrForBranch(repo.name, worktree.branch)
         if (pr && pr.isDraft === false) next = 'in_review'
@@ -373,8 +398,8 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
       store.setTaskPhase(task.id, next)
       note(
         'dev',
-        `${task.jiraKey}: revisions complete — back to ${next === 'in_review' ? 'review' : 'draft'}.`,
-        { key: task.jiraKey }
+        `${task.issueKey}: revisions complete — back to ${next === 'in_review' ? 'review' : 'draft'}.`,
+        { key: task.issueKey }
       )
     }
     return
@@ -397,9 +422,8 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
       return
     }
     if (r.state === 'CLOSED') {
-      store.setTaskPhase(task.id, 'done')
-      store.setClaimState('dev', task.id, 'done')
-      note('dev', `PR #${task.prNumber} for ${task.jiraKey} was closed — no longer tracking.`, {}, 'warn')
+      store.completeTask(task.id)
+      note('dev', `PR #${task.prNumber} for ${task.issueKey} was closed — no longer tracking.`, {}, 'warn')
       return
     }
 
@@ -411,8 +435,8 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
       if (task.sessionId && sessionManager.isLive(task.sessionId)) {
         sessionManager.kill(task.sessionId, 'comments addressed')
       }
-      note('dev', `${task.jiraKey}: finished addressing review comments on PR #${task.prNumber}.`, {
-        key: task.jiraKey
+      note('dev', `${task.issueKey}: finished addressing review comments on PR #${task.prNumber}.`, {
+        key: task.issueKey
       })
     }
 
@@ -432,12 +456,12 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
         store.recordEvent('dev.ready_to_merge', { taskId: task.id, prNumber: task.prNumber })
         note(
           'dev',
-          `${task.jiraKey} PR #${task.prNumber} is green (${r.approvals}/${settings.requiredApprovals} approvals, 0 unresolved) — ready for your merge.`,
-          { key: task.jiraKey }
+          `${task.issueKey} PR #${task.prNumber} is green (${r.approvals}/${settings.requiredApprovals} approvals, 0 unresolved) — ready for your merge.`,
+          { key: task.issueKey }
         )
         notifier.notify({
           kind: 'pr_ready_to_merge',
-          title: `PR ready to merge — ${task.jiraKey}`,
+          title: `PR ready to merge — ${task.issueKey}`,
           body: `PR #${task.prNumber} satisfied all gates. Merge when ready.`,
           deepLink: { type: 'task', id: task.id }
         })
@@ -451,13 +475,13 @@ async function advanceOne(task: JiraTask, settings: Settings): Promise<void> {
     // ready_to_merge: regressed? (new changes requested) → back to in_review.
     if (!satisfied && (r.changesRequested || r.unresolvedThreads > 0)) {
       store.setTaskPhase(task.id, 'in_review')
-      note('dev', `${task.jiraKey} got new feedback — back to addressing comments.`, {}, 'warn')
+      note('dev', `${task.issueKey} got new feedback — back to addressing comments.`, {}, 'warn')
     }
   }
 }
 
 async function startAddressComments(
-  task: JiraTask,
+  task: TrackerTask,
   repo: Repo,
   worktree: { path: string; id: number } | null
 ): Promise<void> {
@@ -479,9 +503,9 @@ async function startAddressComments(
     cwd: worktree.path,
     env: process.env,
     worktreeId: worktree.id,
-    title: `${task.jiraKey} address comments`.slice(0, 80),
+    title: `${task.issueKey} address comments`.slice(0, 80),
     initialInput: prompt
   })
   store.attachSessionToWork('dev', task.id, sessionId)
-  note('dev', `${task.jiraKey}: addressing review feedback on PR #${task.prNumber}.`, { key: task.jiraKey })
+  note('dev', `${task.issueKey}: addressing review feedback on PR #${task.prNumber}.`, { key: task.issueKey })
 }

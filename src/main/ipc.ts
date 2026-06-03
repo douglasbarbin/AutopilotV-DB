@@ -10,13 +10,14 @@ import { brain } from './brain/brain'
 import { notifier } from './notify'
 import { buildState, pushState } from './state'
 import { startReview, actOnReview, approveOnly } from './review/orchestrator'
-import { pruneWorktree, discardWorktree } from './worktree/manager'
+import { pruneWorktree } from './worktree/manager'
 import {
   startDevTask,
   delegateDevTask,
   publishDevTask,
   mergeDevTask,
-  requestDevChanges
+  requestDevChanges,
+  resetDevTask
 } from './dev/orchestrator'
 import { ensureLocalModel, stopLocalModel } from './localmodel/manager'
 import { setSecret } from './secrets'
@@ -81,17 +82,7 @@ export function registerIpc(): void {
   })
 
   handle(Channels.devReset, async (taskId: number) => {
-    const task = store.getTask(taskId)
-    if (task?.sessionId && sessionManager.isLive(task.sessionId)) {
-      sessionManager.kill(task.sessionId, 'dev reset')
-    }
-    if (task?.worktreeId) {
-      const wt = store.getWorktree(task.worktreeId)
-      // Force-discard the (possibly dirty) tree + branch so the retry is clean.
-      if (wt && !wt.prunedAt) await discardWorktree(wt)
-    }
-    store.resetTask(taskId)
-    store.recordEvent('dev.reset', { taskId })
+    await resetDevTask(taskId)
     pushState()
   })
 
@@ -172,15 +163,15 @@ export function registerIpc(): void {
     pushState()
   })
 
-  handle(Channels.jiraProjectToggle, async (key: string, enabled: boolean) => {
-    store.setJiraProjectEnabled(key, enabled)
-    store.recordEvent('jira.project_toggled', { key, enabled })
+  handle(Channels.trackerProjectToggle, async (key: string, enabled: boolean) => {
+    store.setTrackerProjectEnabled(key, enabled)
+    store.recordEvent('tracker.project_toggled', { key, enabled })
     pushState()
   })
 
-  handle(Channels.jiraProjectSetRepo, async (key: string, repoName: string) => {
-    store.setJiraProjectRepo(key, repoName)
-    store.recordEvent('jira.project_repo_set', { key, repoName })
+  handle(Channels.trackerProjectSetRepo, async (key: string, repoName: string) => {
+    store.setTrackerProjectRepo(key, repoName)
+    store.recordEvent('tracker.project_repo_set', { key, repoName })
     pushState()
   })
 

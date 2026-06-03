@@ -65,7 +65,7 @@ export function App() {
   const activeSessions = state.sessions.filter((s) =>
     ['starting', 'running', 'stalled', 'needs_human'].includes(s.status)
   ).length
-  const enabledProjects = new Set(state.jiraProjects.filter((p) => p.enabled).map((p) => p.key))
+  const enabledProjects = new Set(state.trackerProjects.filter((p) => p.enabled).map((p) => p.key))
   const workCount =
     state.prReviews.filter((p) => !['submitted', 'dismissed', 'pruned'].includes(p.state)).length +
     state.tasks.filter((t) => t.status !== 'done' && enabledProjects.has(t.projectKey)).length

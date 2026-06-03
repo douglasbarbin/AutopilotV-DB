@@ -26,7 +26,7 @@ export type ReviewAction = 'approve' | 'request_changes' | 'comment' | 'dismiss'
 
 export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'ready_to_merge' | 'done'
 
-/** AutopilotV's own dev lifecycle phase for a claimed task (independent of Jira status). */
+/** AutopilotV's own dev lifecycle phase for a claimed task (independent of tracker status). */
 export type DevPhase =
   | 'unclaimed'
   | 'implementing'
@@ -46,7 +46,7 @@ export interface Repo {
   cloneState: 'present' | 'missing' | 'cloning'
 }
 
-export interface JiraProject {
+export interface TrackerProject {
   key: string
   name: string
   enabled: boolean
@@ -54,13 +54,13 @@ export interface JiraProject {
   repoName: string
 }
 
-export interface JiraTask {
+export interface TrackerTask {
   id: number
-  jiraKey: string
+  issueKey: string
   projectKey: string
   title: string
   status: TaskStatus
-  jiraStatus: string
+  trackerStatus: string
   assignee: string
   priority: number
   issueType: string
@@ -235,8 +235,8 @@ export interface Settings {
 
 // The full snapshot pushed to the renderer.
 export interface AppState {
-  tasks: JiraTask[]
-  jiraProjects: JiraProject[]
+  tasks: TrackerTask[]
+  trackerProjects: TrackerProject[]
   prReviews: PrReview[]
   reviews: ReviewSummary[]
   sessions: Session[]

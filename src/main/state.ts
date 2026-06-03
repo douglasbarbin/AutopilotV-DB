@@ -7,7 +7,7 @@ import type { AppState } from '@shared/types/domain'
 export function buildState(): AppState {
   return {
     tasks: store.listTasks(),
-    jiraProjects: store.listJiraProjects(),
+    trackerProjects: store.listTrackerProjects(),
     prReviews: store.listPrReviews(),
     reviews: store.listReviews(),
     sessions: store.listSessions(),

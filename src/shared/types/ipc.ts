@@ -26,8 +26,8 @@ export const Channels = {
   harnessUpsert: 'harness.upsert',
   harnessDelete: 'harness.delete',
   settingsUpdate: 'settings.update',
-  jiraProjectToggle: 'jira.projectToggle',
-  jiraProjectSetRepo: 'jira.projectSetRepo',
+  trackerProjectToggle: 'jira.projectToggle',
+  trackerProjectSetRepo: 'jira.projectSetRepo',
   localModelStart: 'localModel.start',
   localModelStop: 'localModel.stop',
   devPublish: 'dev.publish',
@@ -102,7 +102,7 @@ export interface AutopilotVApi {
   upsertHarness(cfg: HarnessConfig): Promise<void>
   deleteHarness(id: string): Promise<void>
   updateSettings(patch: Partial<Settings>): Promise<void>
-  toggleJiraProject(key: string, enabled: boolean): Promise<void>
+  toggleTrackerProject(key: string, enabled: boolean): Promise<void>
   setProjectRepo(key: string, repoName: string): Promise<void>
   startLocalModel(harnessId: string): Promise<void>
   stopLocalModel(harnessId: string): Promise<void>

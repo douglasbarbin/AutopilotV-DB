@@ -52,7 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
     '- Match the style, naming, and conventions of the surrounding code.',
     '- Keep the change focused on the task; avoid unrelated refactors.',
     "- Run and pass the project's tests and linters before opening the PR.",
-    '- Write clear, scoped commits that reference the Jira key.',
+    '- Write clear, scoped commits that reference the issue key.',
     '- Update or add tests for the behavior you change.'
   ].join('\n')
 }

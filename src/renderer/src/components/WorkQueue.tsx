@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AppState, JiraTask } from '@shared/types/domain'
+import type { AppState, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
 
 const TYPE_COLOR: Record<string, string> = {
@@ -14,7 +14,7 @@ export function WorkQueue({ state }: { state: AppState }) {
   const openReviews = state.prReviews.filter(
     (p) => !['submitted', 'dismissed', 'pruned'].includes(p.state)
   )
-  const enabled = new Set(state.jiraProjects.filter((p) => p.enabled).map((p) => p.key))
+  const enabled = new Set(state.trackerProjects.filter((p) => p.enabled).map((p) => p.key))
   const openTasks = state.tasks.filter(
     (t) => t.phase !== 'done' && t.issueType.toLowerCase() !== 'epic' && enabled.has(t.projectKey)
   )
@@ -75,15 +75,15 @@ export function WorkQueue({ state }: { state: AppState }) {
           {sprint ? <span className="sprint-pill">{sprint}</span> : <span className="count-pill">{openTasks.length}</span>}
         </div>
 
-        {state.jiraProjects.length > 0 && (
+        {state.trackerProjects.length > 0 && (
           <div className="project-filter">
             <span className="project-filter-label">Projects</span>
-            {state.jiraProjects.map((p) => (
+            {state.trackerProjects.map((p) => (
               <button
                 key={p.key}
                 className={`project-chip ${p.enabled ? 'on' : 'off'}`}
                 title={`${p.name} — ${p.openCount} open · click to ${p.enabled ? 'hide' : 'show'}`}
-                onClick={() => void api.toggleJiraProject(p.key, !p.enabled)}
+                onClick={() => void api.toggleTrackerProject(p.key, !p.enabled)}
               >
                 <span className="project-chip-dot" />
                 {p.key}
@@ -113,7 +113,7 @@ const PHASE_META: Record<string, { label: string; color: string }> = {
   error: { label: 'Error', color: 'var(--red)' }
 }
 
-// Jira status labels, shown until AutopilotV is actively driving the task.
+// Tracker status labels, shown until AutopilotV is actively driving the task.
 const STATUS_META: Record<string, { label: string; color: string }> = {
   todo: { label: 'To Do', color: 'var(--comment)' },
   in_progress: { label: 'In Progress', color: 'var(--blue)' },
@@ -122,12 +122,12 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   done: { label: 'Done', color: 'var(--green)' }
 }
 
-function TaskRow({ task, autoPublish }: { task: JiraTask; autoPublish: boolean }) {
+function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolean }) {
   const typeColor = TYPE_COLOR[task.issueType] ?? 'var(--comment)'
-  // Reflect the real Jira status while unclaimed; show AutopilotV's phase once it's driving.
+  // Reflect the real tracker status while unclaimed; show AutopilotV's phase once it's driving.
   const driving = task.phase !== 'unclaimed'
   const phaseMeta = PHASE_META[task.phase]
-  const label = driving ? (phaseMeta?.label ?? task.phase) : task.jiraStatus || 'To Do'
+  const label = driving ? (phaseMeta?.label ?? task.phase) : task.trackerStatus || 'To Do'
   const color = driving
     ? (phaseMeta?.color ?? 'var(--comment)')
     : (STATUS_META[task.status]?.color ?? 'var(--comment)')
@@ -157,15 +157,15 @@ function TaskRow({ task, autoPublish }: { task: JiraTask; autoPublish: boolean }
           <span className="chip type" style={{ color: typeColor, borderColor: typeColor }}>
             {task.issueType}
           </span>
-          <span className="chip key">{task.jiraKey}</span>
+          <span className="chip key">{task.issueKey}</span>
           <span className="work-title">{task.title}</span>
         </div>
         <span className="work-sub">
           <span className="state-tag" style={{ color }}>
             {label}
           </span>
-          {driving && task.jiraStatus && (
-            <span className="jira-status"> · Jira: {task.jiraStatus}</span>
+          {driving && task.trackerStatus && (
+            <span className="tracker-status"> · Tracker: {task.trackerStatus}</span>
           )}
           {task.prNumber ? (
             <>
@@ -252,7 +252,7 @@ function TaskRow({ task, autoPublish }: { task: JiraTask; autoPublish: boolean }
       {takingOver && (
         <div className="request-form takeover-form">
           <label className="takeover-label">
-            Take over {task.jiraKey} (Jira: {task.jiraStatus || task.status}). AutopilotV adopts an
+            Take over {task.issueKey} (tracker: {task.trackerStatus || task.status}). AutopilotV adopts an
             existing PR if it can find one — give it a number below to be explicit.
           </label>
           <input

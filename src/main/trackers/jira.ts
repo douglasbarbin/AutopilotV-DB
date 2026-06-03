@@ -61,11 +61,23 @@ export const jiraTracker: ProjectTracker = {
 
   async transition(key: string, target: TransitionTarget): Promise<void> {
     log.info('transitioning jira issue', { key, status: target })
-    const r = await exec('acli', ['jira', 'workitem', 'transition', key, '--status', target], {
-      timeoutMs: 20_000
-    })
-    if (r.code !== 0) {
-      throw new Error(`acli transition failed for ${key} -> ${target}: ${r.stderr || r.stdout}`)
+    // The work item MUST go through --key (a positional key errors out), --yes
+    // skips the interactive confirm, and --json gives a machine-readable result.
+    // acli exits 0 even when the transition fails, so trust the JSON, not the code.
+    const r = await exec(
+      'acli',
+      ['jira', 'workitem', 'transition', '--key', key, '--status', target, '--yes', '--json'],
+      { timeoutMs: 20_000 }
+    )
+    let parsed: { successCount?: number; results?: { status: string; message: string }[] } | null = null
+    try {
+      parsed = JSON.parse(r.stdout || '{}')
+    } catch {
+      // Non-JSON output (e.g. a CLI/auth error printed to stdout) → treat as failure.
+    }
+    if (!parsed || (parsed.successCount ?? 0) < 1) {
+      const detail = parsed?.results?.[0]?.message ?? r.stderr ?? r.stdout ?? 'no transition performed'
+      throw new Error(`acli transition failed for ${key} -> ${target}: ${detail}`)
     }
   },
 

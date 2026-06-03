@@ -36,10 +36,10 @@ const api: AutopilotVApi = {
   deleteHarness: (id: string) => ipcRenderer.invoke(Channels.harnessDelete, id) as Promise<void>,
   updateSettings: (patch: Partial<Settings>) =>
     ipcRenderer.invoke(Channels.settingsUpdate, patch) as Promise<void>,
-  toggleJiraProject: (key: string, enabled: boolean) =>
-    ipcRenderer.invoke(Channels.jiraProjectToggle, key, enabled) as Promise<void>,
+  toggleTrackerProject: (key: string, enabled: boolean) =>
+    ipcRenderer.invoke(Channels.trackerProjectToggle, key, enabled) as Promise<void>,
   setProjectRepo: (key: string, repoName: string) =>
-    ipcRenderer.invoke(Channels.jiraProjectSetRepo, key, repoName) as Promise<void>,
+    ipcRenderer.invoke(Channels.trackerProjectSetRepo, key, repoName) as Promise<void>,
   startLocalModel: (harnessId: string) =>
     ipcRenderer.invoke(Channels.localModelStart, harnessId) as Promise<void>,
   stopLocalModel: (harnessId: string) =>

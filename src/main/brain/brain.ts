@@ -6,7 +6,7 @@ import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
 import { autoDriveSession } from './autodrive'
 import { harvestReviews, startReview } from '../review/orchestrator'
-import { startDevTask, advanceDevTasks } from '../dev/orchestrator'
+import { startDevTask, advanceDevTasks, resetDevTask } from '../dev/orchestrator'
 import { gcOrphanedWorktrees } from '../worktree/manager'
 import { makeProvider } from '../llm/provider'
 import { tickState } from './tickState'
@@ -171,8 +171,9 @@ export class Brain extends EventEmitter {
       let epics = 0
       let kept = 0
       let disabled = 0
+      const reopened: { id: number; key: string; status: string }[] = []
       for (const it of issues) {
-        store.upsertJiraProjectSeen(it.projectKey, it.projectName)
+        store.upsertTrackerProjectSeen(it.projectKey, it.projectName)
         if (it.issueType.toLowerCase() === 'epic') {
           epics++
           continue // defensive: never work an epic even if the query lets one through
@@ -182,19 +183,31 @@ export class Brain extends EventEmitter {
           continue // project toggled off by the user
         }
         kept++
-        store.upsertTask({
-          jiraKey: it.key,
+        const { id, reopened: didReopen } = store.upsertTask({
+          issueKey: it.key,
           projectKey: it.projectKey,
           title: it.title,
           assignee: it.assignee,
           priority: it.priority,
           issueType: it.issueType,
           sprint: it.sprint,
-          status: mapJiraStatus(it.status),
-          jiraStatus: it.status
+          status: mapTrackerStatus(it.status),
+          trackerStatus: it.status
         })
+        if (didReopen) reopened.push({ id, key: it.key, status: it.status })
       }
       store.purgeEpicTasks() // drop any epics previously stored
+
+      // A finished task the tracker has moved back to To Do (e.g. QA bounced it):
+      // tear it down to a clean slate so the scheduler can pick it up afresh.
+      for (const r of reopened) {
+        await resetDevTask(r.id, 'task.reopened')
+        this.reason(
+          'reconcile',
+          `${r.key} was completed but the tracker now shows it back in To Do ("${r.status}") — re-queued for a fresh pickup.`,
+          { key: r.key, status: r.status }
+        )
+      }
       const sprint = issues.find((i) => i.sprint)?.sprint
       this.setHealth({
         name: 'tracker',
@@ -350,12 +363,12 @@ export class Brain extends EventEmitter {
       const sid = await startDevTask(store.getTask(task.id)!)
       if (sid) {
         slots--
-        this.reason('dev', `Claimed ${task.jiraKey} "${task.title}" and started implementation.`, {
-          key: task.jiraKey
+        this.reason('dev', `Claimed ${task.issueKey} "${task.title}" and started implementation.`, {
+          key: task.issueKey
         })
       } else {
         store.releaseLease('dev', task.id)
-        this.reason('dev', `Could not start ${task.jiraKey} — no cloned repo available.`, { key: task.jiraKey }, 'warn')
+        this.reason('dev', `Could not start ${task.issueKey} — no cloned repo available.`, { key: task.issueKey }, 'warn')
       }
     }
   }
@@ -402,7 +415,7 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-function mapJiraStatus(name: string): 'todo' | 'in_progress' | 'in_review' | 'ready_to_merge' | 'done' {
+function mapTrackerStatus(name: string): 'todo' | 'in_progress' | 'in_review' | 'ready_to_merge' | 'done' {
   const n = name.trim().toLowerCase()
   if (/(done|closed|resolved|complete|cancell)/.test(n)) return 'done'
   if (/review/.test(n)) return 'in_review'

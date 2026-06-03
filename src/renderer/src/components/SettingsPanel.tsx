@@ -166,16 +166,16 @@ export function SettingsPanel({ state }: { state: AppState }) {
             </label>
           )
         )}
-        {state.jiraProjects.length > 0 && (
+        {state.trackerProjects.length > 0 && (
           <div className="settings-projects">
             <span>Projects (auto-discovered) — enable and map each to a repo for dev work</span>
-            {state.jiraProjects.map((p) => (
+            {state.trackerProjects.map((p) => (
               <div className="project-map-row" key={p.key}>
                 <label className="checkbox">
                   <input
                     type="checkbox"
                     checked={p.enabled}
-                    onChange={(e) => void api.toggleJiraProject(p.key, e.target.checked)}
+                    onChange={(e) => void api.toggleTrackerProject(p.key, e.target.checked)}
                   />
                   <span className="proj-key">{p.key}</span>
                 </label>

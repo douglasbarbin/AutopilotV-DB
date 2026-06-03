@@ -9,8 +9,8 @@ import type {
   ClaimState,
   HarnessConfig,
   IntegrationHealth,
-  JiraProject,
-  JiraTask,
+  TrackerProject,
+  TrackerTask,
   PrReview,
   PrReviewState,
   Repo,
@@ -240,46 +240,77 @@ function rowToRepo(r: any): Repo {
 // ---------- tasks (dev line) ----------
 
 export function upsertTask(t: {
-  jiraKey: string
+  issueKey: string
   title: string
   status?: TaskStatus
-  jiraStatus?: string
+  trackerStatus?: string
   assignee?: string
   priority?: number
   issueType?: string
   sprint?: string
   projectKey?: string
-}): void {
-  getDb()
-    .prepare(
-      `INSERT INTO tasks (jira_key, project_key, title, status, jira_status, assignee, priority, issue_type, sprint)
-       VALUES (@jira_key, @project_key, @title, @status, @jira_status, @assignee, @priority, @issue_type, @sprint)
-       ON CONFLICT(jira_key) DO UPDATE SET
+}): { id: number; reopened: boolean } {
+  const db = getDb()
+  // Detect a reopen BEFORE the write: a task we'd already finished that the
+  // tracker now shows back in a To-Do state, under a status string different from
+  // the one it carried at completion. The status-change guard prevents a freshly
+  // merged task (whose tracker status simply lags) from being re-queued at once.
+  const prev = db
+    .prepare('SELECT id, phase, done_tracker_status FROM tasks WHERE issue_key = ?')
+    .get(t.issueKey) as { id: number; phase: string; done_tracker_status: string } | undefined
+  const incomingStatus = t.status ?? 'todo'
+  const incomingTrackerStatus = t.trackerStatus ?? 'To Do'
+  const reopened =
+    !!prev &&
+    prev.phase === 'done' &&
+    incomingStatus === 'todo' &&
+    incomingTrackerStatus !== prev.done_tracker_status
+
+  db.prepare(
+    `INSERT INTO tasks (issue_key, project_key, title, status, tracker_status, assignee, priority, issue_type, sprint)
+       VALUES (@issue_key, @project_key, @title, @status, @tracker_status, @assignee, @priority, @issue_type, @sprint)
+       ON CONFLICT(issue_key) DO UPDATE SET
          title = @title, assignee = @assignee, priority = @priority, project_key = @project_key,
-         status = @status, jira_status = @jira_status,
+         status = @status, tracker_status = @tracker_status,
          issue_type = @issue_type, sprint = @sprint, updated_at = datetime('now')`
-    )
-    .run({
-      jira_key: t.jiraKey,
-      project_key: t.projectKey ?? t.jiraKey.split('-')[0] ?? '',
-      title: t.title,
-      status: t.status ?? 'todo',
-      jira_status: t.jiraStatus ?? 'To Do',
-      assignee: t.assignee ?? null,
-      priority: t.priority ?? 3,
-      issue_type: t.issueType ?? 'Story',
-      sprint: t.sprint ?? ''
-    })
+  ).run({
+    issue_key: t.issueKey,
+    project_key: t.projectKey ?? t.issueKey.split('-')[0] ?? '',
+    title: t.title,
+    status: incomingStatus,
+    tracker_status: incomingTrackerStatus,
+    assignee: t.assignee ?? null,
+    priority: t.priority ?? 3,
+    issue_type: t.issueType ?? 'Story',
+    sprint: t.sprint ?? ''
+  })
+  const id = prev?.id ?? (db.prepare('SELECT id FROM tasks WHERE issue_key = ?').get(t.issueKey) as { id: number }).id
+  return { id, reopened }
 }
 
-export function listTasks(): JiraTask[] {
+/**
+ * Mark a dev task finished and freeze the tracker status it had at that moment.
+ * The frozen status is what lets a later move back to To Do (e.g. a QA bounce)
+ * read as a genuine reopen rather than the post-merge status lag.
+ */
+export function completeTask(id: number): void {
+  getDb()
+    .prepare(
+      `UPDATE tasks SET phase = 'done', claim_state = 'done', done_tracker_status = tracker_status,
+       session_id = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = datetime('now')
+       WHERE id = ?`
+    )
+    .run(id)
+}
+
+export function listTasks(): TrackerTask[] {
   const rows = getDb()
     .prepare('SELECT * FROM tasks ORDER BY priority DESC, updated_at DESC')
     .all() as any[]
   return rows.map(rowToTask)
 }
 
-export function getTask(id: number): JiraTask | null {
+export function getTask(id: number): TrackerTask | null {
   const row = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id) as any
   return row ? rowToTask(row) : null
 }
@@ -297,7 +328,7 @@ export function setTaskStatus(id: number, status: TaskStatus): void {
     .run(status, id)
 }
 
-export function setTaskPhase(id: number, phase: JiraTask['phase']): void {
+export function setTaskPhase(id: number, phase: TrackerTask['phase']): void {
   getDb()
     .prepare("UPDATE tasks SET phase = ?, updated_at = datetime('now') WHERE id = ?")
     .run(phase, id)
@@ -321,19 +352,19 @@ export function resetTask(id: number): void {
     .prepare(
       `UPDATE tasks SET phase = 'unclaimed', claim_state = 'unclaimed', lease_owner = NULL,
        lease_expires_at = NULL, session_id = NULL, worktree_id = NULL, repo_id = NULL,
-       pr_number = NULL, pr_url = '', updated_at = datetime('now') WHERE id = ?`
+       pr_number = NULL, pr_url = '', done_tracker_status = '', updated_at = datetime('now') WHERE id = ?`
     )
     .run(id)
 }
 
-function rowToTask(r: any): JiraTask {
+function rowToTask(r: any): TrackerTask {
   return {
     id: r.id,
-    jiraKey: r.jira_key,
-    projectKey: r.project_key ?? (r.jira_key?.split('-')[0] ?? ''),
+    issueKey: r.issue_key,
+    projectKey: r.project_key ?? (r.issue_key?.split('-')[0] ?? ''),
     title: r.title,
     status: r.status,
-    jiraStatus: r.jira_status ?? 'To Do',
+    trackerStatus: r.tracker_status ?? 'To Do',
     assignee: r.assignee ?? '',
     priority: r.priority,
     issueType: r.issue_type ?? 'Story',
@@ -349,21 +380,21 @@ function rowToTask(r: any): JiraTask {
   }
 }
 
-// ---------- jira projects ----------
+// ---------- tracker projects ----------
 
 /** Record that a project was seen (keeps the existing enabled flag). */
-export function upsertJiraProjectSeen(key: string, name: string): void {
+export function upsertTrackerProjectSeen(key: string, name: string): void {
   if (!key) return
   getDb()
     .prepare(
-      `INSERT INTO jira_projects (key, name) VALUES (?, ?)
+      `INSERT INTO tracker_projects (key, name) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET name = excluded.name`
     )
     .run(key, name || key)
 }
 
-export function listJiraProjects(): JiraProject[] {
-  const rows = getDb().prepare('SELECT * FROM jira_projects ORDER BY key').all() as any[]
+export function listTrackerProjects(): TrackerProject[] {
+  const rows = getDb().prepare('SELECT * FROM tracker_projects ORDER BY key').all() as any[]
   return rows.map((r) => ({
     key: r.key,
     name: r.name,
@@ -377,12 +408,12 @@ export function listJiraProjects(): JiraProject[] {
   }))
 }
 
-export function setJiraProjectEnabled(key: string, enabled: boolean): void {
-  getDb().prepare('UPDATE jira_projects SET enabled = ? WHERE key = ?').run(enabled ? 1 : 0, key)
+export function setTrackerProjectEnabled(key: string, enabled: boolean): void {
+  getDb().prepare('UPDATE tracker_projects SET enabled = ? WHERE key = ?').run(enabled ? 1 : 0, key)
 }
 
-export function setJiraProjectRepo(key: string, repoName: string): void {
-  getDb().prepare('UPDATE jira_projects SET repo_name = ? WHERE key = ?').run(repoName, key)
+export function setTrackerProjectRepo(key: string, repoName: string): void {
+  getDb().prepare('UPDATE tracker_projects SET repo_name = ? WHERE key = ?').run(repoName, key)
 }
 
 /**
@@ -391,7 +422,7 @@ export function setJiraProjectRepo(key: string, repoName: string): void {
  * Returns null if the project has no mapping.
  */
 export function resolveProjectRepo(projectKey: string): Repo | null {
-  const row = getDb().prepare('SELECT repo_name FROM jira_projects WHERE key = ?').get(projectKey) as
+  const row = getDb().prepare('SELECT repo_name FROM tracker_projects WHERE key = ?').get(projectKey) as
     | { repo_name: string }
     | undefined
   const name = row?.repo_name
@@ -409,7 +440,7 @@ export function resolveProjectRepo(projectKey: string): Repo | null {
 }
 
 export function isProjectEnabled(key: string): boolean {
-  const row = getDb().prepare('SELECT enabled FROM jira_projects WHERE key = ?').get(key) as
+  const row = getDb().prepare('SELECT enabled FROM tracker_projects WHERE key = ?').get(key) as
     | { enabled: number }
     | undefined
   // Unknown projects default to enabled (they've just been discovered).

@@ -164,6 +164,28 @@ const MIGRATIONS: Migration[] = [
     up: `
     ALTER TABLE tasks ADD COLUMN jira_status TEXT NOT NULL DEFAULT 'To Do';
     `
+  },
+  {
+    // done_jira_status: the raw tracker status a task had when it was last marked
+    // done. Lets a refresh tell a genuine reopen (QA bounced it back to To Do)
+    // apart from the lag right after we finish — so a completed task can be
+    // re-queued, but not instantly re-implemented the moment it merges.
+    version: 8,
+    up: `
+    ALTER TABLE tasks ADD COLUMN done_jira_status TEXT NOT NULL DEFAULT '';
+    `
+  },
+  {
+    // De-Jira-fy the schema: AutopilotV supports multiple trackers (Jira, Vikunja,
+    // GitHub Projects), so the work-item columns/table get tracker-agnostic names.
+    // Pure renames — no data moves.
+    version: 9,
+    up: `
+    ALTER TABLE tasks RENAME COLUMN jira_key TO issue_key;
+    ALTER TABLE tasks RENAME COLUMN jira_status TO tracker_status;
+    ALTER TABLE tasks RENAME COLUMN done_jira_status TO done_tracker_status;
+    ALTER TABLE jira_projects RENAME TO tracker_projects;
+    `
   }
 ]
 
