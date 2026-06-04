@@ -19,8 +19,8 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "rebuild": "electron-builder install-app-deps",
-    "postinstall": "node ./scripts/patch-better-sqlite3.js && node node_modules/electron/install.js && electron-builder install-app-deps",
+    "rebuild": "node ./scripts/rebuild-native.js",
+    "postinstall": "node ./scripts/patch-better-sqlite3.js && node node_modules/electron/install.js && node ./scripts/rebuild-native.js",
     "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {
