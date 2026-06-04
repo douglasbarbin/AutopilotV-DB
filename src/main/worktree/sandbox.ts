@@ -75,10 +75,29 @@ export function buildReviewSandbox(opts: {
     const p = join(shimDir, name)
     writeFileSync(p, SHIM_BODY, { mode: 0o755 })
     chmodSync(p, 0o755)
+    if (process.platform === 'win32') {
+      writeFileSync(p + '.cmd', `@echo off\r\necho sandbox: '%~n0' is blocked inside a PR-review session (no forge mutation allowed). >&2\r\nexit /b 87\r\n`)
+    }
   }
   const gitShim = join(shimDir, 'git')
   writeFileSync(gitShim, GIT_WRAPPER(opts.realGit), { mode: 0o755 })
   chmodSync(gitShim, 0o755)
+  if (process.platform === 'win32') {
+    const body = `@echo off\r\n` +
+      `set "arg1=%~1"\r\n` +
+      `if "%arg1%"=="push" goto block\r\n` +
+      `if "%arg1%"=="fetch" goto block\r\n` +
+      `if "%arg1%"=="pull" goto block\r\n` +
+      `if "%arg1%"=="remote" goto block\r\n` +
+      `if "%arg1%"=="clone" goto block\r\n` +
+      `goto delegate\r\n` +
+      `:block\r\n` +
+      `echo sandbox: 'git %arg1%' is blocked inside a PR-review session. >&2\r\n` +
+      `exit /b 87\r\n` +
+      `:delegate\r\n` +
+      `"${opts.realGit}" %*\r\n`
+    writeFileSync(gitShim + '.cmd', body)
+  }
 
   // PATH handling: prepend the shim dir so `gh`/`hub`/remote-write `git` resolve
   // to our hard-fail shims before any real binary. We deliberately do NOT delete

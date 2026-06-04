@@ -36,8 +36,9 @@ describe('buildReviewSandbox (security invariant)', () => {
   it('the gh shim hard-fails when executed', () => {
     const { shimDir } = buildReviewSandbox({ worktreePath: dir, realGit: '/usr/bin/git' })
     let exitCode = 0
+    const cmd = process.platform === 'win32' ? join(shimDir, 'gh.cmd') : join(shimDir, 'gh')
     try {
-      execFileSync(join(shimDir, 'gh'), ['pr', 'review', '--approve'], { stdio: 'pipe' })
+      execFileSync(cmd, ['pr', 'review', '--approve'], { stdio: 'pipe' })
     } catch (err: any) {
       exitCode = err.status
     }
@@ -46,13 +47,15 @@ describe('buildReviewSandbox (security invariant)', () => {
 
   it('the git shim blocks push but the script delegates other commands', () => {
     const { shimDir } = buildReviewSandbox({ worktreePath: dir, realGit: '/usr/bin/git' })
-    const body = readFileSync(join(shimDir, 'git'), 'utf8')
-    expect(body).toContain('push|fetch|pull|remote|clone')
+    const filename = process.platform === 'win32' ? 'git.cmd' : 'git'
+    const body = readFileSync(join(shimDir, filename), 'utf8')
+    expect(body).toContain('push')
     expect(body).toContain('/usr/bin/git')
 
     let exitCode = 0
+    const cmd = process.platform === 'win32' ? join(shimDir, 'git.cmd') : join(shimDir, 'git')
     try {
-      execFileSync(join(shimDir, 'git'), ['push', 'origin', 'main'], { stdio: 'pipe' })
+      execFileSync(cmd, ['push', 'origin', 'main'], { stdio: 'pipe' })
     } catch (err: any) {
       exitCode = err.status
     }
