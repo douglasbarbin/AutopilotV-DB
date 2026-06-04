@@ -50,6 +50,7 @@ jobs:
           npm ci --ignore-scripts
           npm install --no-save node-gyp@11
           Remove-Item -Recurse -Force node_modules\@electron\rebuild\node_modules\node-gyp -ErrorAction SilentlyContinue
+          node node_modules/electron/install.js
           npx electron-builder install-app-deps
       - name: Install deps (non-Windows)
         if: runner.os != 'Windows'
