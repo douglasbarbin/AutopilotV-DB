@@ -1,6 +1,6 @@
 {
   "name": "autopilotv",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "AutopilotV — agent orchestrator for software development and PR reviewing",
   "main": "./out/main/index.js",
   "author": "justinwoodring",
