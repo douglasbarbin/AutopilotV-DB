@@ -38,7 +38,7 @@ describe('buildReviewSandbox (security invariant)', () => {
     let exitCode = 0
     const cmd = process.platform === 'win32' ? join(shimDir, 'gh.cmd') : join(shimDir, 'gh')
     try {
-      execFileSync(cmd, ['pr', 'review', '--approve'], { stdio: 'pipe' })
+      execFileSync(cmd, ['pr', 'review', '--approve'], { stdio: 'pipe', shell: true })
     } catch (err: any) {
       exitCode = err.status
     }
@@ -55,7 +55,7 @@ describe('buildReviewSandbox (security invariant)', () => {
     let exitCode = 0
     const cmd = process.platform === 'win32' ? join(shimDir, 'git.cmd') : join(shimDir, 'git')
     try {
-      execFileSync(cmd, ['push', 'origin', 'main'], { stdio: 'pipe' })
+      execFileSync(cmd, ['push', 'origin', 'main'], { stdio: 'pipe', shell: true })
     } catch (err: any) {
       exitCode = err.status
     }
