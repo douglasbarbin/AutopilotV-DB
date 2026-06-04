@@ -31,7 +31,6 @@ function resolveTrayIcon(): string | null {
 
 /** Build the tray context menu. */
 function buildTrayMenu(): Electron.Menu {
-  const settings = store.getSettings()
   const isBrainRunning = brain.state.running
   const activeSessions = store.countActiveSessions()
 

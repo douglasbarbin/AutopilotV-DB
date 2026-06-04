@@ -118,4 +118,5 @@ export interface AutopilotVApi {
   onSessionOutput(cb: (chunk: SessionOutputChunk) => void): () => void
   onNotification(cb: (n: NotificationPayload) => void): () => void
   onOpenAbout(cb: () => void): () => void
+  onTrayOpenSettings(cb: () => void): () => void
 }
