@@ -72,6 +72,11 @@ const api: AutopilotVApi = {
     const fn = () => cb()
     ipcRenderer.on(Channels.evtOpenAbout, fn)
     return () => ipcRenderer.removeListener(Channels.evtOpenAbout, fn)
+  },
+  onTrayOpenSettings: (cb: () => void) => {
+    const fn = () => cb()
+    ipcRenderer.on(Channels.evtTrayOpenSettings, fn)
+    return () => ipcRenderer.removeListener(Channels.evtTrayOpenSettings, fn)
   }
 }
 

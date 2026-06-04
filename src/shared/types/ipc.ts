@@ -45,7 +45,8 @@ export const Channels = {
   evtState: 'evt.state',
   evtSessionOutput: 'evt.sessionOutput',
   evtNotification: 'evt.notification',
-  evtOpenAbout: 'evt.openAbout'
+  evtOpenAbout: 'evt.openAbout',
+  evtTrayOpenSettings: 'evt.trayOpenSettings'
 } as const
 
 // Command payload/response shapes.

@@ -11,7 +11,7 @@ Status: **implemented** — living document kept in sync with the application.
 
 AutopilotV is a single-user **desktop application** (Electron) that acts as a
 "brain" + session manager. It continuously asks _"what work is mine to do?"_ —
-**tracker** tasks assigned to me (Jira, GitHub Projects, or ShipReq), and GitHub
+**tracker** tasks assigned to me (Jira, GitHub Projects, or Vikunja), and GitHub
 PRs awaiting my review — and drives that work toward completion by spawning and
 supervising **CLI coding-agent sessions** ("harnesses") running in real PTYs,
 visualized in the UI via xterm.js.
@@ -61,7 +61,7 @@ environment + integration setup.
 | Brain | **Deterministic poll loop** for fetch/detect; **LLM only for judgment** (ambiguous decisions, review reasoning, stall responses) |
 | State | **Local SQLite** in the app data dir |
 | Integrations | `gh` (GitHub) + **pluggable project-tracker adapters** — shelled out from the main process |
-| Project trackers | **Adapter model** — `jira` (acli), `ghproject` (GitHub Projects via gh), `shipreq` (HTTP). Active adapter is selectable; its settings fields drive the UI |
+| Project trackers | **Adapter model** — `jira` (acli), `ghproject` (GitHub Projects via gh), `vikunja` (REST API). Active adapter is selectable; its settings fields drive the UI |
 | First milestone | **PR Reviewing** first; **Software Development now built as a full lifecycle** (see §9) |
 | Repos | **Multiple configured repos**; AutopilotV manages clones + per-repo worktree root |
 | Review sandbox | **PATH-scrub + `gh` shim + env-strip** (no OS/container sandbox in v1) |
@@ -235,7 +235,7 @@ endpoint lifecycle rather than treating it as opaque:
 ### 6.4 Project-tracker adapters
 The tracker is a pluggable adapter behind a `ProjectTracker` interface
 (`listAssigned`, `transition`, `checkAuth`). Built-in adapters: **`jira`** (acli),
-**`ghproject`** (GitHub Projects via `gh`), **`shipreq`** (configurable HTTP). The
+**`ghproject`** (GitHub Projects via `gh`), **`vikunja`** (REST API with personal token). The
 **active** adapter is selectable in Settings, and its declared fields (a shared
 descriptor) render the tracker settings UI. Items are normalized to a neutral work
 shape (key, title, status, assignee, priority, type, sprint, project).
@@ -471,8 +471,8 @@ Settings**, with badge counts and a live "tick #N · Ns ago" status + Tick-now.
 - Per-harness adapter config incl. role-default flags (§6); per-project enable +
   repo mapping (`jira_projects`).
 - Secrets: rely on existing `gh` / tracker (`acli`) / agent CLI logins — **no API
-  key required**. The keychain (`keytar`) is available for future creds; nothing
-  sensitive is stored in SQLite or logs.
+  key required**. Electron `safeStorage` (OS keychain) is used for any future creds;
+  nothing sensitive is stored in SQLite or logs.
 
 ---
 
@@ -486,7 +486,7 @@ Settings**, with badge counts and a live "tick #N · Ns ago" status + Tick-now.
 | Terminals | `node-pty` (main process) ↔ `xterm.js` (renderer), streamed over IPC |
 | State | SQLite via `better-sqlite3` (synchronous, in main process) |
 | GitHub | `gh` CLI (shelled out, JSON output via `--json`) |
-| Trackers | adapter model: `jira` (`acli`), `ghproject` (`gh`), `shipreq` (HTTP) |
+| Trackers | adapter model: `jira` (`acli`), `ghproject` (`gh`), `vikunja` (REST API) |
 | LLM | Configurable provider — `local` (`openai` client → local endpoint) or `harness` (any agent CLI run headless `-p`, no API key) |
 | Packaging | `electron-builder`, cross-platform (mac dmg/zip · win nsis · linux AppImage) |
 | CI | GitHub Actions — typecheck + vitest on Ubuntu; best-effort per-OS packaging matrix |
@@ -699,7 +699,7 @@ All v1 open questions resolved. Remaining unknowns are implementation-level
    per-session auto-drive, AGENTS.md template, terminal, Wipe DB,
    cross-platform packaging + CI, MIT license.
 9. **M8 — Pluggability & polish:** project-tracker adapters (jira · ghproject ·
-   shipreq) with adapter-driven settings; harness role defaults + any-harness brain;
+   vikunja) with adapter-driven settings; harness role defaults + any-harness brain;
    themes; first-run setup walkthrough + environment check; agnostic/neutral naming.
 
 ---
@@ -714,7 +714,7 @@ it is re-runnable from **Settings → Appearance → Setup walkthrough**. Steps:
    dependency with status, role, version/auth detail, and an install hint:
    - **required:** `git`, `gh` (+ auth);
    - **recommended:** the active tracker's tool (`acli` + auth for Jira / endpoint
-     reachability for ShipReq), `claude`, `pi`, and the local LLM endpoint (pinged);
+     reachability for Vikunja), `claude`, `pi`, and the local LLM endpoint (pinged);
    - **optional:** other configured harness commands.
    Has a Re-check button.
 3. **GitHub** — username + watched repos.

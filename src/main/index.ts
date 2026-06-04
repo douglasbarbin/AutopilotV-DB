@@ -14,10 +14,12 @@ import { brain } from './brain/brain'
 import { sessionManager } from './sessions/manager'
 import { stopAll as stopLocalModels } from './localmodel/manager'
 import { pushState } from './state'
+import { initTray, destroyTray } from './tray'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 let mainWindow: BrowserWindow | null = null
+let quitting = false
 
 const openAbout = () => mainWindow?.webContents.send(Channels.evtOpenAbout)
 const REPO_URL = 'https://github.com/JustinWoodring/AutopilotV'
@@ -138,8 +140,23 @@ app.whenReady().then(() => {
   buildAppMenu()
   createWindow()
 
+  // On Windows/Linux, closing the window hides it to the tray instead of quitting.
+  if (process.platform !== 'darwin') {
+    mainWindow?.on('close', (e) => {
+      if (!quitting) {
+        e.preventDefault()
+        mainWindow?.hide()
+      }
+    })
+  }
+
   // Push fresh state once the renderer has loaded.
   mainWindow?.webContents.on('did-finish-load', () => pushState())
+
+  // System tray (Windows/Linux — macOS already has the dock menu).
+  if (process.platform !== 'darwin') {
+    initTray()
+  }
 
   // Smoke mode: boot, verify core wiring, then exit (used by CI / quick checks).
   if (process.env.AUTOPILOTV_SMOKE) {
@@ -165,7 +182,6 @@ app.whenReady().then(() => {
   })
 })
 
-let quitting = false
 app.on('before-quit', async (e) => {
   if (quitting) return
   e.preventDefault()
@@ -176,6 +192,7 @@ app.on('before-quit', async (e) => {
   store.reclaimExpiredLeases()
   await sessionManager.killAll('app_quit')
   stopLocalModels()
+  destroyTray()
   closeDb()
   app.exit(0)
 })

@@ -1,28 +1,44 @@
+import { safeStorage } from 'electron'
 import { log } from './log'
 
-const SERVICE = 'com.justinwoodring.autopilotv'
+// Electron safeStorage uses the OS keychain natively:
+//   macOS → Keychain, Windows → Credential Locker, Linux → libsecret.
+// No native rebuild required — it ships with Electron.
+// We wrap it so environments without a secure backend (some Linux CI runners)
+// degrade gracefully to an in-memory map.
 
-// keytar is a native module; import lazily so unit tests / non-keychain envs
-// don't hard-require it.
-async function keytar(): Promise<typeof import('keytar') | null> {
+const memoryFallback = new Map<string, string>()
+let secureAvailable: boolean | null = null
+
+async function isSecureAvailable(): Promise<boolean> {
+  if (secureAvailable !== null) return secureAvailable
   try {
-    return await import('keytar')
-  } catch (err) {
-    log.warn('keytar unavailable; secrets will not persist', { err: String(err) })
-    return null
+    secureAvailable = await safeStorage.isSecureStorageAvailable()
+  } catch {
+    secureAvailable = false
+  }
+  if (!secureAvailable) {
+    log.warn('secure storage unavailable; secrets will use in-memory fallback')
+  }
+  return secureAvailable
+}
+
+export async function setSecret(key: string, value: string): Promise<void> {
+  if (await isSecureAvailable()) {
+    await safeStorage.writeString(key, value)
+  } else {
+    memoryFallback.set(key, value)
   }
 }
 
-const memoryFallback = new Map<string, string>()
-
-export async function setSecret(key: string, value: string): Promise<void> {
-  const kt = await keytar()
-  if (kt) await kt.setPassword(SERVICE, key, value)
-  else memoryFallback.set(key, value)
-}
-
 export async function getSecret(key: string): Promise<string | null> {
-  const kt = await keytar()
-  if (kt) return kt.getPassword(SERVICE, key)
+  if (await isSecureAvailable()) {
+    try {
+      return await safeStorage.readString(key)
+    } catch {
+      // Key doesn't exist or was cleared by the OS
+      return null
+    }
+  }
   return memoryFallback.get(key) ?? null
 }

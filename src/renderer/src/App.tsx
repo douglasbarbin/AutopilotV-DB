@@ -39,6 +39,7 @@ export function App() {
   const [toast, setToast] = useState<NotificationPayload | null>(null)
   const [showAbout, setShowAbout] = useState(false)
   useEffect(() => api.onOpenAbout(() => setShowAbout(true)), [])
+  useEffect(() => api.onTrayOpenSettings(() => setTab('settings')), [])
 
   const onNotify = useCallback((n: NotificationPayload) => {
     setToast(n)

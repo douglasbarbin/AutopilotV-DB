@@ -59,7 +59,7 @@ instead of typing prompts.
 - **Auto-drive.** The brain detects stalled sessions and answers their prompts to
   keep them moving, gated by a destructive-command denylist and a per-session toggle.
 - **Pluggable by design.**
-  - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), and ShipReq  the active
+  - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), and Vikunja  the active
     adapter drives the settings UI.
   - *Harnesses:* any CLI agent; flag one as the review, brain, or coding default.
   - *Brain LLM:* a local OpenAI-compatible endpoint, or any harness run headless.
@@ -74,6 +74,8 @@ instead of typing prompts.
   orphaned sessions and worktrees are reconciled at boot.
 - **Themes.** Tomorrow Night 80s (default), Tokyo Night, Synthwave, and a light
   Tomorrow  native window chrome follows the choice.
+- **System tray** (Windows/Linux). Close the window to minimize to tray; the tray
+  icon shows live status, lets you toggle the brain, force a tick, or quit.
 - A brain reasoning feed, an audit log, OS notifications, a "drop a terminal in this
   worktree" action, and a one-click database wipe.
 
@@ -105,7 +107,7 @@ preload bridge.
 - **[`gh`](https://cli.github.com/)** authenticated (`gh auth login`)  used for PR
   discovery, reviews, and GitHub Projects.
 - A project tracker: **Jira** via Atlassian **`acli`**, **GitHub Projects** (via
-  `gh`), or **ShipReq** (an HTTP endpoint).
+  `gh`), or **Vikunja** (REST API with personal API token).
 - For LLM judgment: a local **OpenAI-compatible** server (for example LM Studio,
   default `http://127.0.0.1:1234`), or any agent CLI you are already logged into 
   no API key required in that case.
@@ -121,7 +123,7 @@ review sandbox relies on POSIX shims, so macOS and Linux are first-class.
 ```bash
 git clone https://github.com/JustinWoodring/AutopilotV.git
 cd AutopilotV
-npm install     # rebuilds native modules (better-sqlite3, node-pty, keytar) for Electron
+npm install     # rebuilds native modules (better-sqlite3, node-pty) for Electron
 npm run dev
 ```
 
@@ -190,7 +192,7 @@ is stored in the database or logs.
 src/
   main/         Electron main process
     brain/        poll loop, scheduling, stall auto-drive
-    trackers/     project-tracker adapters (jira · ghproject · shipreq)
+    trackers/     project-tracker adapters (jira · ghproject · vikunja)
     review/       sandboxed PR-review orchestration
     dev/          dev-task lifecycle state machine
     sessions/     node-pty session manager
