@@ -24,6 +24,8 @@ import { setSecret } from './secrets'
 import { makeProvider } from './llm/provider'
 import { checkEnvironment } from './env'
 import { log } from './log'
+import { getPrDiff } from './integrations/github'
+import { exec } from './util/exec'
 
 export function registerIpc(): void {
   handle(Channels.stateSnapshot, async () => buildState())
@@ -241,6 +243,33 @@ export function registerIpc(): void {
   handle(Channels.secretSet, async (key: string, value: string) => {
     await setSecret(key, value)
     store.recordEvent('secret.set', { key })
+  })
+
+  handle(Channels.gitGetDiff, async (opts: { worktreeId?: number; prNumber?: number; repoId?: number }) => {
+    if (opts.worktreeId) {
+      const wt = store.getWorktree(opts.worktreeId)
+      if (!wt) return 'Worktree not found.'
+      const repo = store.getRepo(wt.repoId)
+      const base = repo?.defaultBranch || 'main'
+      // Run diff in the worktree directory.
+      // First, get the merge-base diff against origin/defaultBranch to show all changes made on the branch.
+      const r = await exec('git', ['diff', `origin/${base}...HEAD`], { cwd: wt.path })
+      if (r.code === 0 && r.stdout.trim()) {
+        return r.stdout
+      }
+      // Fallback: get unstaged/staged local changes in the worktree
+      const r2 = await exec('git', ['diff', 'HEAD'], { cwd: wt.path })
+      return r2.stdout || 'No changes.'
+    } else if (opts.prNumber && opts.repoId) {
+      const repo = store.getRepo(opts.repoId)
+      if (!repo) return 'Repository not found.'
+      try {
+        return await getPrDiff(repo.name, opts.prNumber)
+      } catch (err) {
+        return `Failed to fetch PR diff: ${String(err)}`
+      }
+    }
+    return 'No diff context.'
   })
 
   // ---- main -> renderer wiring ----

@@ -171,8 +171,8 @@ export class SessionManager extends EventEmitter {
         setTimeout(() => {
           this.write(sessionId, submit)
           store.recordEvent('session.kickoff', { via: 'initial-input' }, { sessionId })
-        }, 500)
-      }, 1200)
+        }, 1000) // 1 second delay after typing to ensure the terminal registers the command text
+      }, 3000) // Wait 3 seconds for harness command-line to fully spin up
     }
 
     return sessionId

@@ -1504,3 +1504,209 @@ button:disabled {
 .onboard-htrow {
   grid-template-columns: minmax(150px, 1fr) repeat(4, 64px) !important;
 }
+
+/* ===== Diff View Styling ===== */
+.diff-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+.diff-header h4 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-strong);
+}
+.diff-loading, .diff-error, .diff-empty {
+  padding: 24px;
+  text-align: center;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  color: var(--comment);
+  font-style: italic;
+}
+.diff-files {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.diff-file-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.diff-file-name {
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-strong);
+  font-weight: 600;
+  font-size: 12px;
+}
+.diff-file-lines {
+  display: flex;
+  flex-direction: column;
+  overflow-x: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.diff-line {
+  white-space: pre;
+  padding: 1px 12px;
+  display: flex;
+}
+.diff-line-content {
+  flex-shrink: 0;
+}
+.diff-line.add {
+  background: rgba(153, 204, 153, 0.12);
+  color: #a3e2a3;
+  border-left: 3px solid var(--green);
+}
+.diff-line.del {
+  background: rgba(242, 119, 122, 0.12);
+  color: #ff9496;
+  border-left: 3px solid var(--red);
+}
+.diff-line.meta {
+  background: rgba(102, 153, 204, 0.08);
+  color: var(--purple);
+  opacity: 0.85;
+}
+.diff-line.normal {
+  color: var(--fg);
+  border-left: 3px solid transparent;
+}
+.collapsible-diff-drawer {
+  animation: slideDown 0.25s ease-out;
+  overflow: hidden;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Glassmorphism Overrides & Accents ===== */
+.glass-panel {
+  background: rgba(45, 45, 45, 0.65) !important;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3) !important;
+}
+:root[data-theme='synthwave'] .glass-panel {
+  background: rgba(36, 27, 47, 0.6) !important;
+  border: 1px solid rgba(255, 126, 219, 0.1) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 126, 219, 0.05) !important;
+}
+:root[data-theme='tokyo-night'] .glass-panel {
+  background: rgba(26, 27, 38, 0.65) !important;
+  border: 1px solid rgba(122, 162, 247, 0.1) !important;
+}
+:root[data-theme='tomorrow'] .glass-panel {
+  background: rgba(255, 255, 255, 0.65) !important;
+  border: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Apply glass styling to sidebar */
+.sidebar {
+  background: rgba(35, 35, 35, 0.7);
+  backdrop-filter: blur(16px);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+:root[data-theme='synthwave'] .sidebar {
+  background: rgba(28, 20, 40, 0.7);
+}
+:root[data-theme='tokyo-night'] .sidebar {
+  background: rgba(22, 22, 30, 0.7);
+}
+:root[data-theme='tomorrow'] .sidebar {
+  background: rgba(246, 246, 246, 0.7);
+}
+
+/* Hover glow effects for cards */
+.card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* ===== Rocket/Starfield Space Theme ===== */
+.rocket-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rocket-ship {
+  font-size: 14px;
+  display: inline-block;
+  animation: rocketFloat 2s ease-in-out infinite;
+}
+@keyframes rocketFloat {
+  0%, 100% { transform: translateY(0) rotate(45deg); }
+  50% { transform: translateY(-3px) rotate(45deg); }
+}
+.rocket-fire {
+  font-size: 8px;
+  animation: firePulse 0.15s ease-in-out infinite alternate;
+}
+@keyframes firePulse {
+  0% { transform: scale(0.85) translateX(-1px); opacity: 0.7; }
+  100% { transform: scale(1.15) translateX(0px); opacity: 1; }
+}
+
+/* Cosmic starfield canvas style */
+.starfield-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.15;
+  transition: opacity 1s ease-in-out;
+}
+.starfield-overlay.active {
+  opacity: 0.65;
+}
+
+/* Translucent themes for cards & session pane (glass cockpit) */
+.session-pane {
+  background: rgba(35, 35, 35, 0.55) !important;
+  backdrop-filter: blur(10px);
+}
+:root[data-theme='synthwave'] .session-pane {
+  background: rgba(28, 20, 40, 0.55) !important;
+}
+:root[data-theme='tokyo-night'] .session-pane {
+  background: rgba(22, 22, 30, 0.55) !important;
+}
+:root[data-theme='tomorrow'] .session-pane {
+  background: rgba(246, 246, 246, 0.55) !important;
+}
+
+.card {
+  background: rgba(49, 49, 49, 0.55) !important;
+  backdrop-filter: blur(6px);
+}
+:root[data-theme='synthwave'] .card {
+  background: rgba(42, 31, 59, 0.55) !important;
+}
+:root[data-theme='tokyo-night'] .card {
+  background: rgba(31, 35, 53, 0.55) !important;
+}
+:root[data-theme='tomorrow'] .card {
+  background: rgba(251, 251, 251, 0.55) !important;
+}

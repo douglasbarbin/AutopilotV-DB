@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AppState, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
+import { DiffView } from './DiffView'
 
 const TYPE_COLOR: Record<string, string> = {
   Story: 'var(--green)',
@@ -30,42 +31,7 @@ export function WorkQueue({ state }: { state: AppState }) {
         </div>
         {openReviews.length === 0 && <div className="empty">Nothing to review right now.</div>}
         {openReviews.map((p) => (
-          <div className={`card work-item ${p.state === 'error' ? 'errored' : ''}`} key={`r${p.id}`}>
-            <div className="work-main">
-              <div className="work-title-row">
-                <span className="chip pr">PR #{p.prNumber}</span>
-                <span className="work-title">{p.title}</span>
-              </div>
-              <span className="work-sub">
-                {p.repoName} · opened by {p.author} ·{' '}
-                <span className={`state-tag ${p.state === 'error' ? 'error' : ''}`}>
-                  {p.state.replace(/_/g, ' ')}
-                </span>
-              </span>
-            </div>
-            <div className="work-actions">
-              {p.state === 'discovered' && (
-                <>
-                  <button className="btn-primary" onClick={() => void api.claim({ kind: 'review', id: p.id })}>
-                    Review
-                  </button>
-                  <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
-                    Skip
-                  </button>
-                </>
-              )}
-              {p.state === 'error' && (
-                <>
-                  <button className="btn-primary" onClick={() => void api.resetReview(p.id)}>
-                    Retry
-                  </button>
-                  <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
-                    Dismiss
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
+          <ReviewRow key={`r${p.id}`} p={p} />
         ))}
       </section>
 
@@ -104,6 +70,60 @@ export function WorkQueue({ state }: { state: AppState }) {
   )
 }
 
+function ReviewRow({ p }: { p: any }) {
+  const [showDiff, setShowDiff] = useState(false)
+  return (
+    <div className={`card work-item task-card ${p.state === 'error' ? 'errored' : ''}`} style={{ padding: '13px 15px', flexDirection: 'column', alignItems: 'stretch' }}>
+      <div className="task-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="work-main">
+          <div className="work-title-row">
+            <span className="chip pr">PR #{p.prNumber}</span>
+            <span className="work-title">{p.title}</span>
+          </div>
+          <span className="work-sub">
+            {p.repoName} · opened by {p.author} ·{' '}
+            <span className={`state-tag ${p.state === 'error' ? 'error' : ''}`}>
+              {p.state.replace(/_/g, ' ')}
+            </span>
+          </span>
+        </div>
+        <div className="work-actions">
+          {p.prNumber != null && p.repoId != null && (
+            <button className={`btn-ghost ${showDiff ? 'active' : ''}`} onClick={() => setShowDiff(!showDiff)}>
+              {showDiff ? 'Hide Diff' : 'Diff'}
+            </button>
+          )}
+          {p.state === 'discovered' && (
+            <>
+              <button className="btn-primary" onClick={() => void api.claim({ kind: 'review', id: p.id })}>
+                Review
+              </button>
+              <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
+                Skip
+              </button>
+            </>
+          )}
+          {p.state === 'error' && (
+            <>
+              <button className="btn-primary" onClick={() => void api.resetReview(p.id)}>
+                Retry
+              </button>
+              <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
+                Dismiss
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {showDiff && (
+        <div className="collapsible-diff-drawer" style={{ borderTop: '1px solid var(--border)', paddingTop: '10px', marginTop: '5px' }}>
+          <DiffView prNumber={p.prNumber} repoId={p.repoId} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PHASE_META: Record<string, { label: string; color: string }> = {
   implementing: { label: 'Implementing', color: 'var(--blue)' },
   draft: { label: 'Draft', color: 'var(--yellow)' },
@@ -138,6 +158,7 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
   const [text, setText] = useState('')
   const [takingOver, setTakingOver] = useState(false)
   const [prNum, setPrNum] = useState('')
+  const [showDiff, setShowDiff] = useState(false)
   const submitRequest = () => {
     if (text.trim()) void api.requestDevChanges(task.id, text)
     setText('')
@@ -150,7 +171,7 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
     setTakingOver(false)
   }
   return (
-    <div className={`card work-item task-card ${task.phase === 'error' ? 'errored' : ''}`}>
+    <div className={`card work-item task-card ${task.phase === 'error' ? 'errored' : ''}`} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
       <div className="task-row">
       <div className="work-main">
         <div className="work-title-row">
@@ -233,6 +254,14 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
             </button>
           </>
         )}
+        {(task.prNumber != null || task.worktreeId != null) && (
+          <button
+            className={`btn-ghost ${showDiff ? 'active' : ''}`}
+            onClick={() => setShowDiff((v) => !v)}
+          >
+            {showDiff ? 'Hide Diff' : 'Diff'}
+          </button>
+        )}
         {task.worktreeId != null && task.phase !== 'done' && (
           <button
             className="btn-ghost"
@@ -292,6 +321,11 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
               Cancel
             </button>
           </div>
+        </div>
+      )}
+      {showDiff && (
+        <div className="collapsible-diff-drawer" style={{ borderTop: '1px solid var(--border)', paddingTop: '10px', marginTop: '5px' }}>
+          <DiffView worktreeId={task.worktreeId || undefined} prNumber={task.prNumber || undefined} repoId={task.repoId || undefined} />
         </div>
       )}
     </div>

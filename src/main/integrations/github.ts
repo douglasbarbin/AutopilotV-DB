@@ -357,3 +357,11 @@ export async function checkAuth(): Promise<{ ok: boolean; detail: string }> {
   const r = await exec('gh', ['auth', 'status'], { timeoutMs: 10_000 })
   return { ok: r.code === 0, detail: (r.stderr || r.stdout).split('\n')[0] ?? '' }
 }
+
+export async function getPrDiff(repoNwo: string, number: number): Promise<string> {
+  const r = await exec('gh', ['pr', 'diff', String(number), '--repo', repoNwo], { timeoutMs: 20_000 })
+  if (r.code !== 0) {
+    throw new Error(`gh pr diff failed: ${r.stderr || r.stdout}`)
+  }
+  return r.stdout
+}

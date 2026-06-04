@@ -53,6 +53,8 @@ const api: AutopilotVApi = {
   checkEnv: () => ipcRenderer.invoke(Channels.envCheck) as Promise<import('@shared/types/ipc').EnvItem[]>,
   setSecret: (key: string, value: string) =>
     ipcRenderer.invoke(Channels.secretSet, key, value) as Promise<void>,
+  getDiff: (opts: { worktreeId?: number; prNumber?: number; repoId?: number }) =>
+    ipcRenderer.invoke(Channels.gitGetDiff, opts) as Promise<string>,
   onState: (cb: (state: AppState) => void) => {
     const fn = (_e: unknown, state: AppState) => cb(state)
     ipcRenderer.on(Channels.evtState, fn)

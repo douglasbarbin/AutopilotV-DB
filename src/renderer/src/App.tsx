@@ -11,6 +11,7 @@ import { BrainPanel } from './components/BrainPanel'
 import { Onboarding } from './components/Onboarding'
 import { About } from './components/About'
 import { Icon } from './components/Icon'
+import { Starfield } from './components/Starfield'
 import logoUrl from '../../../build/icon.png'
 import { api } from './api'
 import type { NotificationPayload } from '@shared/types/ipc'
@@ -86,12 +87,21 @@ export function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" style={{ position: 'relative', overflow: 'hidden' }}>
+      <Starfield active={activeSessions > 0} />
       <aside className="sidebar">
         <div className="brand">
           <img className="logo-img" src={logoUrl} alt="AutopilotV" />
           <div className="brand-text">
-            <strong>AutopilotV</strong>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <strong>AutopilotV</strong>
+              {activeSessions > 0 && (
+                <span className="rocket-container" title="Autopilot active: driving tasks!">
+                  <span className="rocket-ship">🚀</span>
+                  <span className="rocket-fire" style={{ color: 'var(--orange)' }}>🔥</span>
+                </span>
+              )}
+            </div>
             <span>mission control</span>
           </div>
         </div>

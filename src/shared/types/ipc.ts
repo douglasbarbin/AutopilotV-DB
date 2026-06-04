@@ -41,6 +41,7 @@ export const Channels = {
   llmTest: 'llm.test',
   envCheck: 'env.check',
   secretSet: 'secret.set',
+  gitGetDiff: 'git.getDiff',
   // streams (main -> renderer, send)
   evtState: 'evt.state',
   evtSessionOutput: 'evt.sessionOutput',
@@ -113,6 +114,7 @@ export interface AutopilotVApi {
   testLlm(): Promise<{ ok: boolean; detail: string; ms: number }>
   checkEnv(): Promise<EnvItem[]>
   setSecret(key: string, value: string): Promise<void>
+  getDiff(opts: { worktreeId?: number; prNumber?: number; repoId?: number }): Promise<string>
   // subscriptions return an unsubscribe fn
   onState(cb: (state: AppState) => void): () => void
   onSessionOutput(cb: (chunk: SessionOutputChunk) => void): () => void

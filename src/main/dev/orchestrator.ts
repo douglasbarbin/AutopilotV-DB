@@ -7,7 +7,8 @@ import {
   provisionDevWorktree,
   provisionDevWorktreeForBranch,
   pruneWorktree,
-  discardWorktree
+  discardWorktree,
+  writeAdjacentWorkFile
 } from '../worktree/manager'
 import * as gh from '../integrations/github'
 import { notifier } from '../notify'
@@ -120,7 +121,8 @@ export async function startDevTask(task: TrackerTask): Promise<number | null> {
     `Only open the PR once the implementation is complete. ` +
     `As the very last step, write the full PR URL to a file named ${PR_URL_FILE} in this directory ` +
     `(e.g. \`gh pr view --json url -q .url > ${PR_URL_FILE}\`). That file is how the orchestrator ` +
-    `detects the PR — do not skip it.\n`
+    `detects the PR — do not skip it.\n\n` +
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
 
   const sessionId = sessionManager.spawn({
     kind: 'dev',
@@ -238,6 +240,10 @@ export async function requestDevChanges(taskId: number, instructions: string): P
   const harness = store.getCodingHarness()
   if (!harness || !instructions.trim()) return
 
+  if (worktree && repo) {
+    await writeAdjacentWorkFile(worktree.path, repo.id)
+  }
+
   const prompt =
     `Additional change request for ${task.issueKey}${task.prNumber ? ` (PR #${task.prNumber})` : ''}:\n\n` +
     `${instructions.trim()}\n\n` +
@@ -245,7 +251,8 @@ export async function requestDevChanges(taskId: number, instructions: string): P
     `the existing PR. Do NOT open a new PR. ` +
     `When you have committed and pushed everything, signal completion by creating an empty file ` +
     `named ${REVISE_FILE} in this directory (e.g. \`touch ${REVISE_FILE}\`). ` +
-    `That file tells the orchestrator the revision is done.\n`
+    `That file tells the orchestrator the revision is done.\n\n` +
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
 
   const sessionId = sessionManager.spawn({
     kind: 'dev',
@@ -488,6 +495,9 @@ async function startAddressComments(
   if (!worktree) return
   const harness = store.getCodingHarness()
   if (!harness) return
+
+  await writeAdjacentWorkFile(worktree.path, repo.id)
+
   const prompt =
     `Reviewers left feedback on PR #${task.prNumber} (${repo.name}).\n` +
     `Read the unresolved review comments (e.g. \`gh pr view ${task.prNumber} --comments\`), ` +
@@ -495,7 +505,8 @@ async function startAddressComments(
     `Reply to or resolve threads where appropriate. ` +
     `When you have committed and pushed all fixes, signal completion by creating an empty file ` +
     `named ${ADDRESS_FILE} in this directory (e.g. \`touch ${ADDRESS_FILE}\`). ` +
-    `That file tells the orchestrator you are done so it can re-check the PR.\n`
+    `That file tells the orchestrator you are done so it can re-check the PR.\n\n` +
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
   const sessionId = sessionManager.spawn({
     kind: 'dev',
     workRef: `dev:${task.id}`,
