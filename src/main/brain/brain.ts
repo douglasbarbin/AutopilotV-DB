@@ -146,9 +146,10 @@ export class Brain extends EventEmitter {
         prs = await gh.listReviewRequestedPrs(settings.githubReviewFilter)
         detail = `${prs.length} via search filter`
       }
+      let reRequested = 0
       for (const pr of prs) {
         const repo = this.ensureRepo(pr.repoNameWithOwner)
-        store.upsertPrReview({
+        const { reRequested: didReRequest } = store.upsertPrReview({
           prNumber: pr.number,
           repoId: repo.id,
           title: pr.title,
@@ -156,9 +157,21 @@ export class Brain extends EventEmitter {
           branch: pr.headRefName,
           url: pr.url
         })
+        if (didReRequest) {
+          reRequested++
+          this.reason(
+            'refresh',
+            `PR #${pr.number} "${pr.title}" was re-requested for review after I'd already reviewed it — re-queued for a fresh pass.`,
+            { prNumber: pr.number }
+          )
+        }
       }
       this.setHealth({ name: 'github', status: 'ok', detail })
-      this.reason('refresh', `Found ${prs.length} PR(s) awaiting my review.`, { count: prs.length })
+      this.reason(
+        'refresh',
+        `Found ${prs.length} PR(s) awaiting my review${reRequested ? ` (${reRequested} re-requested)` : ''}.`,
+        { count: prs.length, reRequested }
+      )
     } catch (err) {
       this.setHealth({ name: 'github', status: 'down', detail: String(err).slice(0, 120) })
       this.reason('refresh', `GitHub check failed — ${String(err).slice(0, 100)}`, {}, 'warn')

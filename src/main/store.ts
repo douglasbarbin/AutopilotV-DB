@@ -456,7 +456,22 @@ export function upsertPrReview(p: {
   author: string
   branch: string
   url: string
-}): PrReview {
+}): { review: PrReview; reRequested: boolean } {
+  // Detect a re-request BEFORE the write. This PR was surfaced by the
+  // review-requested query, so GitHub currently has a PENDING review request from
+  // us. If we'd already finished it with an approve or request-changes (both of
+  // which clear that request on GitHub), then its reappearance can only mean the
+  // author re-requested review — so it's fresh work and should resurface.
+  // Comment-only reviews and skips never clear the request, so their reappearance
+  // is just the same unchanged request; leaving those terminal states alone avoids
+  // re-reviewing the same PR every tick.
+  const prev = getPrReviewByNumber(p.repoId, p.prNumber)
+  let reRequested = false
+  if (prev?.state === 'submitted') {
+    const last = getLatestReviewForPr(prev.id)
+    reRequested = last?.action === 'approve' || last?.action === 'request_changes'
+  }
+
   getDb()
     .prepare(
       `INSERT INTO pr_reviews (pr_number, repo_id, title, author, branch, url)
@@ -472,7 +487,8 @@ export function upsertPrReview(p: {
       branch: p.branch,
       url: p.url
     })
-  return getPrReviewByNumber(p.repoId, p.prNumber)!
+  if (reRequested && prev) resetPrReview(prev.id)
+  return { review: getPrReviewByNumber(p.repoId, p.prNumber)!, reRequested }
 }
 
 export function getPrReviewByNumber(repoId: number, prNumber: number): PrReview | null {
