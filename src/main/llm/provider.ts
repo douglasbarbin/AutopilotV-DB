@@ -8,9 +8,11 @@ import { log } from '../log'
 // ---- Structured judgment schemas ----
 
 export const StallDecisionSchema = z.object({
-  waitingForInput: z.boolean(),
+  // respond: answer an interactive prompt. nudge: the agent went quiet without
+  // finishing and isn't at a prompt — push it to keep going. wait: it's still
+  // making progress, leave it alone. escalate: hand off to a human.
+  action: z.enum(['respond', 'nudge', 'wait', 'escalate']),
   response: z.string().nullable(),
-  escalate: z.boolean(),
   reason: z.string()
 })
 export type StallDecision = z.infer<typeof StallDecisionSchema>

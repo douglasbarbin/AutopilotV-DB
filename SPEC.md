@@ -39,7 +39,7 @@ environment + integration setup.
 - Surface my actionable work (assigned Jira tasks, PRs awaiting my review) without me hunting for it.
 - Run multiple coding-agent sessions concurrently in headful, visible terminals.
 - Be **harness-agnostic**: Pi, OpenCode, Codex, Cursor, Claude, etc. are configurable adapters.
-- **Auto-drive** stalled sessions: detect when a session is blocked waiting on input and inject a sensible response.
+- **Auto-drive** stalled sessions: detect when a session is blocked waiting on input and inject a sensible response, or nudge a session that has gone quiet without finishing back into motion.
 - Keep PR review work **sandboxed** — the review worktree must not be able to call `gh` (or otherwise mutate GitHub).
 - Cleanly **prune worktrees** when review work is done.
 - Keep a human in the loop for the consequential action (PR approval) via an explicit Approve button.
@@ -332,13 +332,19 @@ the last output. A session is a **stall candidate** when:
 - the tail matches any `stall.waitingPatterns` (e.g. `(y/n)`, `Continue?`).
 
 On a stall candidate (**LLM-first** — OQ-5):
-1. **LLM judgment** — send the recent stdout tail + work-item context to Claude:
-   _"Is this waiting for input? If so, what single response unblocks it safely?
-   If it needs a human, say ESCALATE."_
-2. **Rails check** — before injecting, the proposed response is validated against
-   the destructive-prompt denylist; a flagged response forces escalation instead.
-3. **Inject or escalate** — write the response to the PTY stdin, or flag the
-   session in the UI as **needs human** and stop auto-driving it.
+1. **LLM judgment** — send the recent stdout tail (plus a hint of why it stalled:
+   a matched prompt vs. plain idle) to the model, which picks one **action**:
+   - `respond` — paused at an interactive prompt; returns the exact safe text to submit.
+   - `nudge` — gone quiet without finishing and **not** at a prompt; returns a short
+     message (or null → a default nudge) to get the agent moving again.
+   - `wait` — still actively working (e.g. a build is progressing); take no action.
+   - `escalate` — needs a human (unrecoverable error, destructive/irreversible
+     decision, ambiguous requirements, or the model is unsure).
+2. **Rails check** — before injecting, the response/nudge is validated against the
+   destructive-prompt denylist; a flagged injection forces escalation instead.
+3. **Inject, wait, or escalate** — write the response/nudge to the PTY stdin; or
+   leave a `wait` session alone for the next tick (no injection, so it can't burn
+   the cap); or flag the session in the UI as **needs human** and stop driving it.
 
 Safety rails:
 - Max auto-injections per session before forced escalation (default 5).

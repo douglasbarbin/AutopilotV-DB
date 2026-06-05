@@ -1,4 +1,5 @@
 import type { HarnessConfig } from '@shared/types/domain'
+import type { StallDecision } from '../llm/provider'
 
 export interface StallSignal {
   isCandidate: boolean
@@ -45,4 +46,38 @@ export function violatesDenylist(
     if (haystack.includes(term.toLowerCase())) return term
   }
   return null
+}
+
+/**
+ * Fallback nudge for a session that has gone quiet without finishing and isn't
+ * sitting at a recognizable prompt — used when the LLM picks `nudge` but doesn't
+ * supply its own wording.
+ */
+export const DEFAULT_NUDGE =
+  "You've gone quiet without finishing. If you were waiting on me, take this as a " +
+  'go-ahead and continue with the next step. If the task is actually complete, say ' +
+  'so explicitly and stop.'
+
+export type InjectionPlan =
+  | { kind: 'respond' | 'nudge'; text: string }
+  | { kind: 'wait' }
+  | { kind: 'escalate' }
+
+/**
+ * Pure mapping from a validated LLM stall decision to a concrete autodrive
+ * action. Kept here with the other pure stall logic so the branching is
+ * unit-testable without a live session.
+ */
+export function resolveInjection(decision: StallDecision): InjectionPlan {
+  switch (decision.action) {
+    case 'respond':
+      // A prompt answer with nothing to send is not actionable — hand off.
+      return decision.response ? { kind: 'respond', text: decision.response } : { kind: 'escalate' }
+    case 'nudge':
+      return { kind: 'nudge', text: decision.response?.trim() || DEFAULT_NUDGE }
+    case 'wait':
+      return { kind: 'wait' }
+    default:
+      return { kind: 'escalate' }
+  }
 }

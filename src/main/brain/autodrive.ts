@@ -1,10 +1,10 @@
 import { log } from '../log'
 import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
-import { detectStall, violatesDenylist } from './stall'
+import { detectStall, violatesDenylist, resolveInjection } from './stall'
 import { tickState } from './tickState'
 import { notifier } from '../notify'
-import { judgeValidated, StallDecisionSchema, type LlmProvider } from '../llm/provider'
+import { judgeValidated, StallDecisionSchema, type LlmProvider, type StallDecision } from '../llm/provider'
 import type { Session, Settings } from '@shared/types/domain'
 
 function secondsSince(iso: string | null): number {
@@ -48,16 +48,28 @@ export async function autoDriveSession(
     return
   }
 
-  // LLM judgment
-  let decision
+  // LLM judgment. The hint biases the model toward the likely action: a matched
+  // prompt pattern usually wants an answer; a silent idle session usually wants a
+  // nudge to get moving again (or a human if it's truly stuck).
+  const reasonHint =
+    signal.reason === 'waiting_pattern'
+      ? `A prompt pattern matched (${signal.matchedPattern}); it is most likely paused for input.`
+      : 'No prompt was detected; it has produced no output for a while and may be stuck or idling.'
+  let decision: StallDecision
   try {
     decision = await judgeValidated(
       provider,
       {
         schemaName: 'StallDecision',
         system:
-          'You supervise an autonomous coding-agent terminal session. Given the recent terminal output, decide if it is blocked waiting for user input. If so, provide the single safe response that unblocks it (e.g. "y", "1", a short answer). If it needs a human or you are unsure, set escalate=true.',
-        user: `Recent terminal output (tail):\n\n${tail}\n\nRespond as JSON: {"waitingForInput":bool,"response":string|null,"escalate":bool,"reason":string}`
+          'You supervise an autonomous coding-agent terminal session that appears stalled. ' +
+          'Choose the single best action to keep it productive without a human:\n' +
+          '- "respond": it is paused at an interactive prompt; put the exact, safe text to submit in "response" (e.g. "y", "1", a filename).\n' +
+          '- "nudge": it has gone quiet without finishing and is NOT at a prompt; put a short message that gets it moving again in "response", or null to use a default nudge.\n' +
+          '- "wait": it is still actively working (e.g. a build or progress indicator is advancing); take no action.\n' +
+          '- "escalate": it needs a human — an error it cannot resolve itself, a destructive or irreversible decision, genuinely ambiguous requirements, or you are unsure.\n' +
+          'Prefer keeping the agent moving (respond/nudge) over escalating, but never auto-confirm anything destructive.',
+        user: `${reasonHint}\n\nRecent terminal output (tail):\n\n${tail}\n\nRespond as JSON: {"action":"respond"|"nudge"|"wait"|"escalate","response":string|null,"reason":string}`
       },
       StallDecisionSchema
     )
@@ -67,32 +79,45 @@ export async function autoDriveSession(
     return
   }
 
-  if (decision.escalate || !decision.waitingForInput || decision.response == null) {
-    if (decision.waitingForInput) escalate(session, decision.reason || 'llm escalated')
+  const plan = resolveInjection(decision)
+  if (plan.kind === 'escalate') {
+    escalate(session, decision.reason || 'llm escalated')
+    return
+  }
+  if (plan.kind === 'wait') {
+    // Still making progress per the model — leave it stalled and re-check next
+    // tick. We deliberately don't inject, so this can't burn the injection cap.
+    store.recordEvent(
+      'autodrive.waiting',
+      { sessionId: session.id, reason: decision.reason },
+      { sessionId: session.id }
+    )
     return
   }
 
-  // denylist rail
-  const bad = violatesDenylist(settings.autoDrive.destructiveDenylist, decision.response, tail)
+  // denylist rail — applies to nudges too (a nudge into a destructive prompt
+  // would be just as unsafe as confirming it).
+  const bad = violatesDenylist(settings.autoDrive.destructiveDenylist, plan.text, tail)
   if (bad) {
     store.recordEvent(
       'autodrive.blocked',
-      { sessionId: session.id, matched: bad, response: decision.response },
+      { sessionId: session.id, matched: bad, response: plan.text },
       { level: 'warn', sessionId: session.id }
     )
     escalate(session, `denylist matched: ${bad}`)
     return
   }
 
-  // inject
-  sessionManager.inject(session.id, decision.response)
+  // inject (an answer to a prompt, or a nudge to unstick a quiet session)
+  sessionManager.inject(session.id, plan.text)
   const count = store.incrementInject(session.id)
   store.setSessionStatus(session.id, 'running')
   store.recordEvent(
     'autodrive.injected',
     {
       sessionId: session.id,
-      response: decision.response,
+      kind: plan.kind,
+      response: plan.text,
       reason: decision.reason,
       via: 'llm',
       count,
@@ -103,8 +128,11 @@ export async function autoDriveSession(
   store.recordBrainNote({
     tick: tickState.current,
     category: 'autodrive',
-    message: `"${session.title}" was waiting — replied "${decision.response}" (${decision.reason}).`,
-    detail: { sessionId: session.id, response: decision.response, count }
+    message:
+      plan.kind === 'nudge'
+        ? `"${session.title}" went quiet — nudged it to keep going (${decision.reason}).`
+        : `"${session.title}" was waiting — replied "${plan.text}" (${decision.reason}).`,
+    detail: { sessionId: session.id, kind: plan.kind, response: plan.text, count }
   })
 }
 
