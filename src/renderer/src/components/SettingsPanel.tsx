@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AppState, Settings } from '@shared/types/domain'
 import { TRACKERS, trackerDescriptor } from '@shared/types/trackers'
+import { FORGES, forgeDescriptor } from '@shared/types/forges'
 import { api } from '../api'
 
 export function SettingsPanel({ state }: { state: AppState }) {
@@ -30,6 +31,16 @@ export function SettingsPanel({ state }: { state: AppState }) {
       trackerConfig: {
         ...s.trackerConfig,
         [s.tracker]: { ...(s.trackerConfig?.[s.tracker] ?? {}), [key]: value }
+      }
+    })
+
+  const activeForge = forgeDescriptor(s.forge)
+  const forgeField = (key: string) => s.forgeConfig?.[s.forge]?.[key] ?? ''
+  const setForgeField = (key: string, value: string) =>
+    patch({
+      forgeConfig: {
+        ...s.forgeConfig,
+        [s.forge]: { ...(s.forgeConfig?.[s.forge] ?? {}), [key]: value }
       }
     })
 
@@ -85,46 +96,95 @@ export function SettingsPanel({ state }: { state: AppState }) {
       </section>
 
       <section>
-        <h3>GitHub</h3>
+        <h3>Code forge</h3>
         <label>
-          GitHub username
-          <input
-            defaultValue={s.githubUsername}
-            placeholder="e.g. your-github-username"
-            onBlur={(e) => patch({ githubUsername: e.target.value.trim() })}
-          />
+          Active forge
+          <select value={s.forge} onChange={(e) => patch({ forge: e.target.value })}>
+            {FORGES.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.displayName}
+              </option>
+            ))}
+          </select>
         </label>
-        <label>
-          Watched repositories (one per line, <code>owner/repo</code>)
-          <textarea
-            key={s.watchRepos.join(',')}
-            defaultValue={s.watchRepos.join('\n')}
-            rows={5}
-            placeholder={'owner/repo\nowner/another-repo'}
-            onBlur={(e) =>
-              patch({
-                watchRepos: e.target.value
-                  .split(/[\n,]+/)
-                  .map((x) => x.trim())
-                  .filter(Boolean)
-              })
-            }
-          />
-        </label>
+        {activeForge && <p className="hint">{activeForge.blurb}</p>}
+        {activeForge?.fields.map((f) =>
+          f.type === 'textarea' ? (
+            <label key={f.key}>
+              {f.label}
+              <textarea
+                key={forgeField(f.key)}
+                defaultValue={forgeField(f.key)}
+                placeholder={f.placeholder}
+                rows={4}
+                onBlur={(e) => setForgeField(f.key, e.target.value)}
+              />
+              {f.hint && <span className="hint">{f.hint}</span>}
+            </label>
+          ) : (
+            <label key={f.key}>
+              {f.label}
+              <input
+                key={forgeField(f.key)}
+                type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
+                defaultValue={forgeField(f.key)}
+                placeholder={f.placeholder}
+                onBlur={(e) => setForgeField(f.key, e.target.value)}
+              />
+              {f.hint && <span className="hint">{f.hint}</span>}
+            </label>
+          )
+        )}
         <p className="hint">
-          AutopilotV polls each watched repo for PRs where review is requested from your username
-          (excluding your own). Clone these repos under your <strong>clone parent dir</strong> so
-          review worktrees can be created. Leave the list empty to fall back to the global search
-          filter below.
+          The forge controls PR discovery, review submission, publish, and merge. It's independent
+          of the project tracker — pick any combination (e.g. Jira + GitHub, or Jira + Azure
+          DevOps Repos).
         </p>
-        <label>
-          Fallback search filter (used only when no repos are watched)
-          <input
-            defaultValue={s.githubReviewFilter}
-            onBlur={(e) => patch({ githubReviewFilter: e.target.value })}
-          />
-        </label>
       </section>
+
+      {s.forge === 'github' && (
+        <section>
+          <h3>GitHub</h3>
+          <label>
+            GitHub username
+            <input
+              defaultValue={s.githubUsername}
+              placeholder="e.g. your-github-username"
+              onBlur={(e) => patch({ githubUsername: e.target.value.trim() })}
+            />
+          </label>
+          <label>
+            Watched repositories (one per line, <code>owner/repo</code>)
+            <textarea
+              key={s.watchRepos.join(',')}
+              defaultValue={s.watchRepos.join('\n')}
+              rows={5}
+              placeholder={'owner/repo\nowner/another-repo'}
+              onBlur={(e) =>
+                patch({
+                  watchRepos: e.target.value
+                    .split(/[\n,]+/)
+                    .map((x) => x.trim())
+                    .filter(Boolean)
+                })
+              }
+            />
+          </label>
+          <p className="hint">
+            AutopilotV polls each watched repo for PRs where review is requested from your
+            username (excluding your own). Clone these repos under your{' '}
+            <strong>clone parent dir</strong> so review worktrees can be created. Leave the list
+            empty to fall back to the global search filter below.
+          </p>
+          <label>
+            Fallback search filter (used only when no repos are watched)
+            <input
+              defaultValue={s.githubReviewFilter}
+              onBlur={(e) => patch({ githubReviewFilter: e.target.value })}
+            />
+          </label>
+        </section>
+      )}
 
       <section>
         <h3>Project tracker</h3>

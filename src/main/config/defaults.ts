@@ -15,6 +15,11 @@ export const DEFAULT_SETTINGS: Settings = {
     vikunja: { endpoint: '', token: '', projectId: '', assigneeFilter: '' },
     azuredevops: { org: '', project: '', pat: '', assigneeFilter: '' }
   },
+  forge: 'github',
+  forgeConfig: {
+    github: {},
+    azuredevops: { org: '', project: '', pat: '', reviewerFilter: '' }
+  },
   githubUsername: '',
   watchRepos: [],
   githubReviewFilter: 'is:open is:pr review-requested:@me -author:@me',

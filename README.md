@@ -59,8 +59,10 @@ instead of typing prompts.
 - **Auto-drive.** The brain detects stalled sessions and answers their prompts to
   keep them moving, gated by a destructive-command denylist and a per-session toggle.
 - **Pluggable by design.**
-  - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), and Vikunja  the active
-    adapter drives the settings UI.
+  - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), Azure DevOps Boards
+    (REST), and Vikunja — the active adapter drives the settings UI.
+  - *Forges:* GitHub (`gh` CLI) and Azure DevOps Repos (REST). Tracker and forge
+    are independent — e.g. Jira work shipped to Azure DevOps PRs is a valid setup.
   - *Harnesses:* any CLI agent; flag one as the review, brain, or coding default.
   - *Brain LLM:* a local OpenAI-compatible endpoint, or any harness run headless.
 - **A complete dev lifecycle:** `unclaimed → implementing → draft → in_review →
@@ -104,12 +106,18 @@ preload bridge.
 ## Requirements
 
 - **Node 22+**
-- **[`gh`](https://cli.github.com/)** authenticated (`gh auth login`)  used for PR
-  discovery, reviews, and GitHub Projects.
-- A project tracker: **Jira** via Atlassian **`acli`**, **GitHub Projects** (via
-  `gh`), or **Vikunja** (REST API with personal API token).
+- A code forge — pick one (independent of your project tracker):
+  - **[`gh`](https://cli.github.com/)** authenticated (`gh auth login`), for GitHub
+    PR discovery, reviews, and GitHub Projects.
+  - **Azure DevOps Repos** via REST, using a Personal Access Token. No `az` CLI
+    is required.
+- A project tracker — pick one (independent of your forge):
+  - **Jira** via Atlassian **`acli`**
+  - **GitHub Projects** (via `gh`)
+  - **Azure DevOps Boards** via REST (PAT)
+  - **Vikunja** (REST API with personal API token)
 - For LLM judgment: a local **OpenAI-compatible** server (for example LM Studio,
-  default `http://127.0.0.1:1234`), or any agent CLI you are already logged into 
+  default `http://127.0.0.1:1234`), or any agent CLI you are already logged into —
   no API key required in that case.
 - Clone the repositories you work in under your configured **clone parent dir**
   (default `~/repos`) so AutopilotV can resolve `<owner>/<repo>` →
@@ -192,13 +200,13 @@ is stored in the database or logs.
 src/
   main/         Electron main process
     brain/        poll loop, scheduling, stall auto-drive
-    trackers/     project-tracker adapters (jira · ghproject · vikunja)
+    trackers/     project-tracker adapters (jira · ghproject · vikunja · azuredevops)
+    forges/       code-forge adapters (github · azuredevops)
     review/       sandboxed PR-review orchestration
     dev/          dev-task lifecycle state machine
     sessions/     node-pty session manager
     worktree/     worktree provisioning and the review sandbox
     llm/          brain LLM providers (local · harness)
-    integrations/ github (gh) helpers
   preload/      typed IPC bridge
   renderer/     React UI (themable)
   shared/       types shared across processes

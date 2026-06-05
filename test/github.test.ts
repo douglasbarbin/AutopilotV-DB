@@ -4,19 +4,15 @@ import { vi, describe, it, expect, beforeEach } from 'vitest'
 const { execMock } = vi.hoisted(() => ({ execMock: vi.fn() }))
 vi.mock('../src/main/util/exec', () => ({ exec: execMock, execOrThrow: vi.fn() }))
 
-import {
-  listReviewRequestedPrs,
-  getAdoptablePr,
-  findPrForTask
-} from '../src/main/integrations/github'
+import { githubForge } from '../src/main/forges/github'
 
-describe('listReviewRequestedPrs', () => {
+describe('githubForge.listReviewRequestedPrs', () => {
   beforeEach(() => execMock.mockReset())
 
   it('passes the search filter as a SINGLE argument (so -author:@me is not parsed as a flag)', async () => {
     execMock.mockResolvedValue({ stdout: '[]', stderr: '', code: 0 })
     const filter = 'is:open is:pr review-requested:@me -author:@me'
-    await listReviewRequestedPrs(filter)
+    await githubForge.listReviewRequestedPrs(filter, {})
 
     const [cmd, args] = execMock.mock.calls[0]
     expect(cmd).toBe('gh')
@@ -40,18 +36,18 @@ describe('listReviewRequestedPrs', () => {
       stderr: '',
       code: 0
     })
-    const prs = await listReviewRequestedPrs('whatever')
+    const prs = await githubForge.listReviewRequestedPrs('whatever', {})
     expect(prs).toHaveLength(1)
     expect(prs[0]).toMatchObject({ number: 42, author: 'octocat', repoNameWithOwner: 'acme/widgets' })
   })
 
   it('throws with stderr context on non-zero exit', async () => {
     execMock.mockResolvedValue({ stdout: '', stderr: 'boom', code: 1 })
-    await expect(listReviewRequestedPrs('x')).rejects.toThrow(/boom/)
+    await expect(githubForge.listReviewRequestedPrs('x', {})).rejects.toThrow(/boom/)
   })
 })
 
-describe('getAdoptablePr', () => {
+describe('githubForge.getAdoptablePr', () => {
   beforeEach(() => execMock.mockReset())
 
   it('returns branch/draft/state for a PR by number', async () => {
@@ -67,17 +63,17 @@ describe('getAdoptablePr', () => {
       stderr: '',
       code: 0
     })
-    const pr = await getAdoptablePr('acme/widgets', 7)
+    const pr = await githubForge.getAdoptablePr('acme/widgets', 7, {})
     expect(pr).toMatchObject({ number: 7, branch: 'feature/x', isDraft: true, state: 'OPEN' })
   })
 
   it('returns null when gh exits non-zero (PR not found)', async () => {
     execMock.mockResolvedValue({ stdout: '', stderr: 'not found', code: 1 })
-    expect(await getAdoptablePr('acme/widgets', 999)).toBeNull()
+    expect(await githubForge.getAdoptablePr('acme/widgets', 999, {})).toBeNull()
   })
 })
 
-describe('findPrForTask', () => {
+describe('githubForge.findPrForTask', () => {
   beforeEach(() => execMock.mockReset())
 
   it('searches open PRs by issue key and prefers a branch carrying the key', async () => {
@@ -89,7 +85,7 @@ describe('findPrForTask', () => {
       stderr: '',
       code: 0
     })
-    const pr = await findPrForTask('acme/widgets', 'LDWF-9')
+    const pr = await githubForge.findPrForTask('acme/widgets', 'LDWF-9', {})
     const [, args] = execMock.mock.calls[0]
     expect(args).toContain('LDWF-9')
     expect(args).toContain('--state')
@@ -99,6 +95,6 @@ describe('findPrForTask', () => {
 
   it('returns null when nothing matches', async () => {
     execMock.mockResolvedValue({ stdout: '[]', stderr: '', code: 0 })
-    expect(await findPrForTask('acme/widgets', 'LDWF-9')).toBeNull()
+    expect(await githubForge.findPrForTask('acme/widgets', 'LDWF-9', {})).toBeNull()
   })
 })

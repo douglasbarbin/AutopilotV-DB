@@ -5,7 +5,7 @@ import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
 import { provisionReviewWorktree, pruneWorktree, resolveRealGit } from '../worktree/manager'
 import { buildReviewSandbox } from '../worktree/sandbox'
-import { getPr, submitReview } from '../integrations/github'
+import { forgeForRepo } from '../forges'
 import { notifier } from '../notify'
 import { ReviewResultSchema } from '../llm/provider'
 import type { PrReview, ReviewAction } from '@shared/types/domain'
@@ -35,7 +35,8 @@ export async function startReview(pr: PrReview): Promise<number | null> {
   let branch = pr.branch
   if (!branch) {
     try {
-      const full = await getPr(repo.name, pr.prNumber)
+      const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
+      const full = await forge.getPr(repo.name, pr.prNumber, forgeConfig)
       branch = full.headRefName
       store.upsertPrReview({
         prNumber: pr.prNumber,
@@ -64,7 +65,12 @@ export async function startReview(pr: PrReview): Promise<number | null> {
   }
 
   const realGit = await resolveRealGit()
-  const { env, shimDir } = buildReviewSandbox({ worktreePath: worktree.path, realGit })
+  // Sandbox the right CLIs / env vars for the repo's owning forge.
+  const { env, shimDir } = buildReviewSandbox({
+    worktreePath: worktree.path,
+    realGit,
+    forge: repo.forge
+  })
   store.recordEvent('review.sandbox_built', { prReviewId: pr.id, shimDir }, { sessionId: null })
 
   const prompt = (harness.reviewPrompt ?? '') +
@@ -162,15 +168,16 @@ async function captureReview(
 }
 
 /**
- * Approve-only: approve the PR on GitHub with NO comment body (a bare approval),
- * regardless of whether an AI summary exists. Cleans up any in-flight review
- * session/worktree first.
+ * Approve-only: approve the PR on the active forge with NO comment body (a
+ * bare approval), regardless of whether an AI summary exists. Cleans up any
+ * in-flight review session/worktree first.
  */
 export async function approveOnly(prReviewId: number): Promise<void> {
   const pr = store.getPrReview(prReviewId)
   if (!pr) throw new Error(`pr_review ${prReviewId} not found`)
   const repo = store.getRepo(pr.repoId)
   if (!repo) throw new Error('repo missing')
+  const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
 
   // Tear down any in-flight review attempt for this PR.
   if (pr.sessionId) {
@@ -184,7 +191,7 @@ export async function approveOnly(prReviewId: number): Promise<void> {
     }
   }
 
-  await submitReview(repo.name, pr.prNumber, 'approve', '') // bare approval, no comment
+  await forge.submitReview(repo.name, pr.prNumber, 'approve', '', forgeConfig) // bare approval, no comment
   const existing = store.getLatestReviewForPr(prReviewId)
   if (existing) store.recordReviewAction(existing.id, 'approve')
   store.setPrReviewState(pr.id, 'submitted')
@@ -193,8 +200,9 @@ export async function approveOnly(prReviewId: number): Promise<void> {
 }
 
 /**
- * Act on a review from the UI. Approve/request-changes/comment post to GitHub
- * via gh (main process, sandbox-free); dismiss just records the decision.
+ * Act on a review from the UI. Approve/request-changes/comment post through
+ * the repo's owning forge adapter (main process, sandbox-free); dismiss just
+ * records the decision.
  */
 export async function actOnReview(reviewId: number, action: ReviewAction): Promise<void> {
   const review = store.listReviews().find((r) => r.id === reviewId)
@@ -203,6 +211,7 @@ export async function actOnReview(reviewId: number, action: ReviewAction): Promi
   if (!pr) throw new Error(`pr_review ${review.prReviewId} not found`)
   const repo = store.getRepo(pr.repoId)
   if (!repo) throw new Error('repo missing')
+  const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
 
   if (action === 'dismiss') {
     store.recordReviewAction(reviewId, action)
@@ -211,7 +220,7 @@ export async function actOnReview(reviewId: number, action: ReviewAction): Promi
     return
   }
 
-  await submitReview(repo.name, pr.prNumber, action, review.summary)
+  await forge.submitReview(repo.name, pr.prNumber, action, review.summary, forgeConfig)
   store.recordReviewAction(reviewId, action)
   store.setPrReviewState(pr.id, 'submitted')
   store.recordEvent('review.submitted', { prReviewId: pr.id, action })

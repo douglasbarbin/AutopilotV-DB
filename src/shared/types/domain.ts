@@ -44,6 +44,9 @@ export interface Repo {
   remote: string
   defaultBranch: string
   cloneState: 'present' | 'missing' | 'cloning'
+  /** Which code forge owns this repo (github, azuredevops). Set at upsert time
+   *  from the active forge setting; never re-derived afterwards. */
+  forge: string
 }
 
 export interface TrackerProject {
@@ -89,6 +92,8 @@ export interface PrReview {
   sessionId: number | null
   discoveredAt: string
   updatedAt: string
+  /** Forge this PR was discovered on. Copied from the owning repo at upsert. */
+  forge: string
 }
 
 export interface ReviewFinding {
@@ -169,7 +174,7 @@ export interface LocalModelConfig {
   health?: { path: string; timeoutMs: number }
 }
 
-export type IntegrationName = 'github' | 'tracker' | 'llm' | 'localModel'
+export type IntegrationName = 'forge' | 'tracker' | 'llm' | 'localModel'
 export type IntegrationStatus = 'ok' | 'degraded' | 'down' | 'unknown'
 
 export interface IntegrationHealth {
@@ -177,6 +182,8 @@ export interface IntegrationHealth {
   status: IntegrationStatus
   detail: string
   checkedAt: string
+  /** Optional origin tag — e.g. which forge id produced a 'forge' health row. */
+  source?: string
 }
 
 export interface AppEvent {
@@ -207,6 +214,10 @@ export interface Settings {
   cloneParentDir: string
   tracker: string
   trackerConfig: Record<string, Record<string, string>>
+  /** Active code forge. Independent of `tracker` — pick any combination. */
+  forge: string
+  /** Per-forge config (orgs, PATs, etc.). Keyed by forge id. */
+  forgeConfig: Record<string, Record<string, string>>
   githubUsername: string
   watchRepos: string[]
   githubReviewFilter: string
