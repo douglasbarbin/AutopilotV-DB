@@ -23,6 +23,14 @@ import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
  *     POST /api/v1/projects/{pid}/views/{vid}/buckets/{bid}/tasks
  *     with body {"task_id": <id>}. The task's `bucket_id` field is a
  *     derived/legacy value and is not what controls the board position.
+ *   - Updating percent_done is NOT done via POST /api/v1/tasks/{id}:
+ *     that endpoint treats every omitted field as "clear it" — a partial
+ *     body of { done, percent_done } would delete the task's assignees
+ *     and blank out its description/priority/etc. Instead we use
+ *     POST /api/v1/tasks/bulk with a `fields` whitelist, which only
+ *     touches the listed columns. Assignees still have to be echoed
+ *     back in `values` because the assignee reconciliation runs
+ *     unconditionally before the field whitelist is honored.
  *
  * Config fields (stored in settings.trackerConfig.vikunja):
  *   endpoint       — Base URL, e.g. https://vikunja.example.com
@@ -267,10 +275,25 @@ export const vikunjaTracker: ProjectTracker = {
     // "In Progress / Doing" bucket, then add the task to that bucket.
     // The bucket move is what makes the card visibly change columns on the
     // board. percent_done alone does not move the card.
+    //
+    // The full task payload is also hoisted out of the try so we can
+    // re-send the current assignees when we update percent_done below.
+    // Vikunja's task update path unconditionally reconciles assignees
+    // against the request body *before* any per-field whitelist is
+    // honored — passing an absent assignees list deletes everyone on
+    // the task. The single-task POST /api/v1/tasks/{id} route further
+    // blanks out title/description/priority/etc. when those fields are
+    // not in the body, so we route the percent_done update through the
+    // bulk endpoint with an explicit `fields` list and echo the current
+    // assignees back to keep them intact. (Without that, every "move
+    // to In Progress" silently wiped assignees, labels, description,
+    // priority, due dates, and so on — a regression that left cards
+    // half-empty on the board after the first transition.)
+    let fullTask: any = null
     let projectId: number | null = null
     try {
-      const task = await apiFetch('GET', `${base}/api/v1/tasks/${encodeURIComponent(key)}`, config.token)
-      const pid = Number(task?.project_id)
+      fullTask = await apiFetch('GET', `${base}/api/v1/tasks/${encodeURIComponent(key)}`, config.token)
+      const pid = Number(fullTask?.project_id)
       if (Number.isFinite(pid) && pid > 0) projectId = pid
     } catch (err) {
       log.warn('vikunja: failed to fetch task before transition', { key, err: String(err) })
@@ -316,10 +339,33 @@ export const vikunjaTracker: ProjectTracker = {
     // bucket move. The kanban has no separate "In Review" column, so both
     // targets land in "In Progress"; percent_done is the only signal that
     // distinguishes the two.
+    //
+    // Routed through the bulk endpoint with an explicit `fields` whitelist
+    // so the rest of the task is left alone. The single-task POST would
+    // zero out every omitted column and the assignee list, and there is no
+    // way to opt out on that route. The bulk endpoint accepts the same
+    // payload shape but honors `fields` to only touch the listed columns.
+    //
+    // Assignees still need to be echoed back in `values` because the
+    // assignee reconciliation runs unconditionally before the field
+    // whitelist is applied — an absent list means "delete all", not
+    // "keep all". When the task has no assignees to begin with we omit
+    // the field entirely; the reconciliation is a no-op in that case.
     const percentDone = target === 'In Progress' ? 0.5 : 0.75
-    await apiFetch('POST', `${base}/api/v1/tasks/${encodeURIComponent(key)}`, config.token, {
+    const updateValues: Record<string, unknown> = {
       done: false,
       percent_done: percentDone
+    }
+    if (fullTask && Array.isArray(fullTask.assignees) && fullTask.assignees.length > 0) {
+      updateValues.assignees = fullTask.assignees.map((a: any) => ({
+        id: Number(a.id),
+        username: a.username ?? ''
+      }))
+    }
+    await apiFetch('POST', `${base}/api/v1/tasks/bulk`, config.token, {
+      task_ids: [Number(key)],
+      fields: ['done', 'percent_done'],
+      values: updateValues
     })
   },
 
