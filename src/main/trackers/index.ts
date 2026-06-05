@@ -3,11 +3,13 @@ import type { ProjectTracker } from './types'
 import { jiraTracker } from './jira'
 import { vikunjaTracker } from './vikunja'
 import { ghProjectTracker } from './ghproject'
+import { azureDevOpsTracker } from './azuredevops'
 
 const REGISTRY: Record<string, ProjectTracker> = {
   jira: jiraTracker,
   vikunja: vikunjaTracker,
-  ghproject: ghProjectTracker
+  ghproject: ghProjectTracker,
+  azuredevops: azureDevOpsTracker
 }
 
 export function getTracker(id: string): ProjectTracker {

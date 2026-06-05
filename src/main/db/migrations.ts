@@ -186,6 +186,17 @@ const MIGRATIONS: Migration[] = [
     ALTER TABLE tasks RENAME COLUMN done_jira_status TO done_tracker_status;
     ALTER TABLE jira_projects RENAME TO tracker_projects;
     `
+  },
+  {
+    // Code-forge pluggability: tag each repo with the forge that owns it, and
+    // mirror the forge onto each discovered PR so a stale repo can't trick us
+    // into calling the wrong adapter. Default to 'github' so installs that
+    // pre-date the new forge field keep working unchanged.
+    version: 10,
+    up: `
+    ALTER TABLE repos ADD COLUMN forge TEXT NOT NULL DEFAULT 'github';
+    ALTER TABLE pr_reviews ADD COLUMN forge TEXT NOT NULL DEFAULT 'github';
+    `
   }
 ]
 

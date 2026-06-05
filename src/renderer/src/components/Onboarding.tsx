@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import type { AppState, Settings } from '@shared/types/domain'
 import type { EnvItem } from '@shared/types/ipc'
 import { TRACKERS, trackerDescriptor } from '@shared/types/trackers'
+import { FORGES, forgeDescriptor } from '@shared/types/forges'
 import { api } from '../api'
 
-const STEPS = ['Welcome', 'Environment', 'GitHub', 'Tracker', 'Brain', 'Harnesses', 'Done'] as const
+const STEPS = ['Welcome', 'Environment', 'Forge', 'Tracker', 'Brain', 'Harnesses', 'Done'] as const
 
 export function Onboarding({ state }: { state: AppState }) {
   const s = state.settings
@@ -40,7 +41,7 @@ export function Onboarding({ state }: { state: AppState }) {
         <div className="onboard-body">
           {step === 0 && <Welcome />}
           {step === 1 && <EnvStep />}
-          {step === 2 && <GitHubStep s={s} patch={patch} />}
+          {step === 2 && <ForgeStep s={s} patch={patch} />}
           {step === 3 && <TrackerStep s={s} patch={patch} />}
           {step === 4 && <BrainStep s={s} patch={patch} />}
           {step === 5 && <HarnessStep state={state} />}
@@ -88,10 +89,12 @@ function Welcome() {
       <p className="muted">A few minutes of setup and you'll be flying. Here's the recommended kit:</p>
       <ul className="onboard-list">
         <li>
-          <strong>git</strong> + <strong>GitHub CLI (gh)</strong> — required, for repos and PRs.
+          <strong>git</strong> + a <strong>code forge</strong> — GitHub (uses the <code>gh</code>{' '}
+          CLI) or Azure DevOps Repos (REST API).
         </li>
         <li>
-          A <strong>project tracker</strong> — Jira (acli), GitHub Projects, or Vikunja.
+          A <strong>project tracker</strong> — Jira (acli), GitHub Projects, Azure DevOps Boards,
+          or Vikunja.
         </li>
         <li>
           At least one <strong>coding agent CLI</strong> — Claude Code is recommended; Pi, Codex,
@@ -155,43 +158,94 @@ function EnvStep() {
   )
 }
 
-function GitHubStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) => void }) {
+function ForgeStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) => void }) {
+  const desc = forgeDescriptor(s.forge)
+  const field = (k: string) => s.forgeConfig?.[s.forge]?.[k] ?? ''
+  const setField = (k: string, v: string) =>
+    patch({
+      forgeConfig: { ...s.forgeConfig, [s.forge]: { ...(s.forgeConfig?.[s.forge] ?? {}), [k]: v } }
+    })
   return (
     <div className="onboard-step">
-      <h2>GitHub</h2>
+      <h2>Code forge</h2>
       <p className="muted">
-        AutopilotV polls these repos for PRs where review is requested from your username (excluding
-        your own).
+        Pick the forge that hosts your PRs. Tracker and forge are independent — you can use Jira
+        with GitHub, or Azure DevOps Boards with GitHub, etc.
       </p>
       <label>
-        Your GitHub username
-        <input
-          defaultValue={s.githubUsername}
-          placeholder="your-github-username"
-          onBlur={(e) => patch({ githubUsername: e.target.value.trim() })}
-        />
+        Forge
+        <select value={s.forge} onChange={(e) => patch({ forge: e.target.value })}>
+          {FORGES.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.displayName}
+            </option>
+          ))}
+        </select>
       </label>
-      <label>
-        Watched repositories (one per line, <code>owner/repo</code>)
-        <textarea
-          key={s.watchRepos.join(',')}
-          defaultValue={s.watchRepos.join('\n')}
-          rows={5}
-          placeholder={'owner/repo\nowner/another-repo'}
-          onBlur={(e) =>
-            patch({
-              watchRepos: e.target.value
-                .split(/[\n,]+/)
-                .map((x) => x.trim())
-                .filter(Boolean)
-            })
-          }
-        />
-      </label>
-      <p className="muted">
-        Clone them under your clone dir (<code>{s.cloneParentDir}</code>) so review/dev worktrees can
-        be created.
-      </p>
+      {desc && <p className="muted">{desc.blurb}</p>}
+
+      {s.forge === 'github' && (
+        <>
+          <label>
+            Your GitHub username
+            <input
+              defaultValue={s.githubUsername}
+              placeholder="your-github-username"
+              onBlur={(e) => patch({ githubUsername: e.target.value.trim() })}
+            />
+          </label>
+          <label>
+            Watched repositories (one per line, <code>owner/repo</code>)
+            <textarea
+              key={s.watchRepos.join(',')}
+              defaultValue={s.watchRepos.join('\n')}
+              rows={5}
+              placeholder={'owner/repo\nowner/another-repo'}
+              onBlur={(e) =>
+                patch({
+                  watchRepos: e.target.value
+                    .split(/[\n,]+/)
+                    .map((x) => x.trim())
+                    .filter(Boolean)
+                })
+              }
+            />
+          </label>
+          <p className="muted">
+            Clone them under your clone dir (<code>{s.cloneParentDir}</code>) so review/dev
+            worktrees can be created.
+          </p>
+        </>
+      )}
+
+      {s.forge !== 'github' &&
+        desc?.fields.map((f) =>
+          f.type === 'textarea' ? (
+            <label key={f.key}>
+              {f.label}
+              <textarea
+                key={field(f.key)}
+                defaultValue={field(f.key)}
+                placeholder={f.placeholder}
+                rows={3}
+                onBlur={(e) => setField(f.key, e.target.value)}
+              />
+              {f.hint && <span className="muted">{f.hint}</span>}
+            </label>
+          ) : (
+            <label key={f.key}>
+              {f.label}
+              <input
+                key={field(f.key)}
+                type={f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'}
+                defaultValue={field(f.key)}
+                placeholder={f.placeholder}
+                onBlur={(e) => setField(f.key, e.target.value)}
+              />
+              {f.hint && <span className="muted">{f.hint}</span>}
+            </label>
+          )
+        )}
     </div>
   )
 }

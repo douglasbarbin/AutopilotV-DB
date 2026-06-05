@@ -24,7 +24,7 @@ import { setSecret } from './secrets'
 import { makeProvider } from './llm/provider'
 import { checkEnvironment } from './env'
 import { log } from './log'
-import { getPrDiff } from './integrations/github'
+import { forgeForRepo } from './forges'
 import { exec } from './util/exec'
 
 export function registerIpc(): void {
@@ -264,7 +264,8 @@ export function registerIpc(): void {
       const repo = store.getRepo(opts.repoId)
       if (!repo) return 'Repository not found.'
       try {
-        return await getPrDiff(repo.name, opts.prNumber)
+        const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
+        return await forge.getPrDiff(repo.name, opts.prNumber, forgeConfig)
       } catch (err) {
         return `Failed to fetch PR diff: ${String(err)}`
       }

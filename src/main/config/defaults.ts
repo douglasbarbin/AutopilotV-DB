@@ -12,7 +12,13 @@ export const DEFAULT_SETTINGS: Settings = {
       jql: 'assignee = currentUser() AND sprint in openSprints() AND issuetype != Epic AND statusCategory != Done ORDER BY priority DESC'
     },
     ghproject: { owner: '', projectNumber: '', username: '', statusField: 'Status' },
-    vikunja: { endpoint: '', token: '', projectId: '', assigneeFilter: '' }
+    vikunja: { endpoint: '', token: '', projectId: '', assigneeFilter: '' },
+    azuredevops: { org: '', project: '', pat: '', assigneeFilter: '' }
+  },
+  forge: 'github',
+  forgeConfig: {
+    github: {},
+    azuredevops: { org: '', project: '', pat: '', reviewerFilter: '' }
   },
   githubUsername: '',
   watchRepos: [],

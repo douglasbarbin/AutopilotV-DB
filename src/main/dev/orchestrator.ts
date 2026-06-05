@@ -10,7 +10,7 @@ import {
   discardWorktree,
   writeAdjacentWorkFile
 } from '../worktree/manager'
-import * as gh from '../integrations/github'
+import { forgeForRepo, type AdoptablePr } from '../forges'
 import { notifier } from '../notify'
 import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
@@ -26,7 +26,8 @@ function readPrUrlFile(worktreePath: string): { number: number; url: string } | 
   if (!existsSync(f)) return null
   const content = readFileSync(f, 'utf8').trim()
   if (!content) return null
-  const fromUrl = content.match(/\/pull\/(\d+)/)
+  // Both /pull/N (GitHub) and /pullrequest/N (Azure DevOps) are valid PR URLs.
+  const fromUrl = content.match(/\/(?:pullrequest|pull)\/(\d+)/i)
   if (fromUrl) return { number: Number(fromUrl[1]), url: content.split(/\s+/)[0] }
   const justNumber = content.match(/(\d{1,7})/)
   if (justNumber) return { number: Number(justNumber[1]), url: content }
@@ -158,9 +159,10 @@ export async function delegateDevTask(task: TrackerTask, prNumberHint?: number):
   }
 
   // Resolve the PR to adopt: an explicit number wins, else discover by issue key.
-  let pr: gh.AdoptablePr | null = null
+  let pr: AdoptablePr | null = null
+  const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
   if (prNumberHint) {
-    pr = await gh.getAdoptablePr(repo.name, prNumberHint)
+    pr = await forge.getAdoptablePr(repo.name, prNumberHint, forgeConfig)
     if (!pr) {
       note(
         'dev',
@@ -170,7 +172,7 @@ export async function delegateDevTask(task: TrackerTask, prNumberHint?: number):
       )
     }
   } else {
-    pr = await gh.findPrForTask(repo.name, task.issueKey)
+    pr = await forge.findPrForTask(repo.name, task.issueKey, forgeConfig)
     if (pr) note('dev', `Found existing PR #${pr.number} for ${task.issueKey} — adopting it.`, { key: task.issueKey })
   }
 
@@ -276,7 +278,8 @@ export async function publishDevTask(taskId: number): Promise<void> {
   if (!task || !task.prNumber || !task.repoId) return
   const repo = store.getRepo(task.repoId)
   if (!repo) return
-  await gh.publishPr(repo.name, task.prNumber)
+  const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
+  await forge.publishPr(repo.name, task.prNumber, forgeConfig)
   store.setTaskPhase(taskId, 'in_review')
   try {
     const { tracker, config } = activeTracker(store.getSettings())
@@ -295,7 +298,8 @@ export async function mergeDevTask(taskId: number): Promise<void> {
   if (!task || !task.prNumber || !task.repoId) return
   const repo = store.getRepo(task.repoId)
   if (!repo) return
-  await gh.mergePr(repo.name, task.prNumber)
+  const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
+  await forge.mergePr(repo.name, task.prNumber, forgeConfig)
   store.recordEvent('dev.merged', { taskId, prNumber: task.prNumber, via: 'autopilotv' })
   await finishMerged(task)
 }
@@ -355,13 +359,15 @@ async function advanceOne(task: TrackerTask, settings: Settings): Promise<void> 
   const repo = task.repoId ? store.getRepo(task.repoId) : null
   const worktree = task.worktreeId ? store.getWorktree(task.worktreeId) : null
   if (!repo) return
+  const { forge, config: forgeConfig } = forgeForRepo(repo, settings)
 
   if (task.phase === 'implementing') {
     if (!worktree) return
-    // Primary signal: the .pr-url file the agent writes. Fallback: query GitHub
-    // for an open PR on the branch (in case the agent skipped the file).
+    // Primary signal: the .pr-url file the agent writes. Fallback: query the
+    // active forge for an open PR on the branch (in case the agent skipped
+    // the file).
     const fromFile = readPrUrlFile(worktree.path)
-    const pr = fromFile ?? (await gh.findPrForBranch(repo.name, worktree.branch))
+    const pr = fromFile ?? (await forge.findPrForBranch(repo.name, worktree.branch, forgeConfig))
     if (pr) {
       store.setTaskPr(task.id, pr.number, pr.url)
       store.setTaskPhase(task.id, 'draft')
@@ -399,7 +405,7 @@ async function advanceOne(task: TrackerTask, settings: Settings): Promise<void> 
       }
       let next: TrackerTask['phase'] = 'draft'
       if (worktree && task.prNumber) {
-        const pr = await gh.findPrForBranch(repo.name, worktree.branch)
+        const pr = await forge.findPrForBranch(repo.name, worktree.branch, forgeConfig)
         if (pr && pr.isDraft === false) next = 'in_review'
       }
       store.setTaskPhase(task.id, next)
@@ -422,7 +428,7 @@ async function advanceOne(task: TrackerTask, settings: Settings): Promise<void> 
 
   if (task.phase === 'in_review' || task.phase === 'ready_to_merge') {
     if (!task.prNumber) return
-    const r = await gh.getPrReadiness(repo.name, task.prNumber)
+    const r = await forge.getPrReadiness(repo.name, task.prNumber, forgeConfig)
 
     if (r.state === 'MERGED') {
       await finishMerged(task)

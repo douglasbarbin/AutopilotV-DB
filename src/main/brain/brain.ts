@@ -11,7 +11,7 @@ import { gcOrphanedWorktrees } from '../worktree/manager'
 import { makeProvider } from '../llm/provider'
 import { tickState } from './tickState'
 import { ensureLocalModel, pingEndpoint } from '../localmodel/manager'
-import * as gh from '../integrations/github'
+import { activeForge, type ForgePr } from '../forges'
 import { activeTracker } from '../trackers'
 import type { IntegrationHealth } from '@shared/types/domain'
 
@@ -120,14 +120,17 @@ export class Brain extends EventEmitter {
   private async refreshWork(): Promise<void> {
     const settings = store.getSettings()
 
-    // GitHub: review-requested PRs.
+    // Code forge: review-requested PRs. The active forge (settings.forge)
+    // chooses which adapter handles discovery + review submission + merge.
     try {
-      let prs: gh.GhPr[]
+      const { forge, config: forgeConfig } = activeForge(settings)
+      let prs: ForgePr[]
       let detail: string
       if (settings.watchRepos.length > 0) {
-        const { prs: found, errors } = await gh.listReviewRequestedPrsForRepos(
+        const { prs: found, errors } = await forge.listReviewRequestedPrsForRepos(
           settings.watchRepos,
-          settings.githubUsername
+          settings.githubUsername,
+          forgeConfig
         )
         prs = found
         detail = `${prs.length} across ${settings.watchRepos.length} repo(s)${
@@ -136,19 +139,20 @@ export class Brain extends EventEmitter {
         if (errors.length) {
           this.reason(
             'refresh',
-            `GitHub: couldn't read ${errors.map((e) => e.repo).join(', ')} — ${errors[0].error}`,
+            `${forge.id}: couldn't read ${errors.map((e) => e.repo).join(', ')} — ${errors[0].error}`,
             { errors },
             'warn'
           )
         }
       } else {
-        // No watched repos configured: fall back to the global search filter.
-        prs = await gh.listReviewRequestedPrs(settings.githubReviewFilter)
+        // No watched repos configured: fall back to the global search filter
+        // (only the GitHub adapter supports this today; others return []).
+        prs = await forge.listReviewRequestedPrs(settings.githubReviewFilter, forgeConfig)
         detail = `${prs.length} via search filter`
       }
       let reRequested = 0
       for (const pr of prs) {
-        const repo = this.ensureRepo(pr.repoNameWithOwner)
+        const repo = this.ensureRepo(pr.repoNameWithOwner, forge.id)
         const { reRequested: didReRequest } = store.upsertPrReview({
           prNumber: pr.number,
           repoId: repo.id,
@@ -166,15 +170,15 @@ export class Brain extends EventEmitter {
           )
         }
       }
-      this.setHealth({ name: 'github', status: 'ok', detail })
+      this.setHealth({ name: 'forge', status: 'ok', detail: `[${forge.id}] ${detail}` })
       this.reason(
         'refresh',
-        `Found ${prs.length} PR(s) awaiting my review${reRequested ? ` (${reRequested} re-requested)` : ''}.`,
-        { count: prs.length, reRequested }
+        `Found ${prs.length} PR(s) awaiting my review on ${forge.id}${reRequested ? ` (${reRequested} re-requested)` : ''}.`,
+        { count: prs.length, reRequested, forge: forge.id }
       )
     } catch (err) {
-      this.setHealth({ name: 'github', status: 'down', detail: String(err).slice(0, 120) })
-      this.reason('refresh', `GitHub check failed — ${String(err).slice(0, 100)}`, {}, 'warn')
+      this.setHealth({ name: 'forge', status: 'down', detail: String(err).slice(0, 120) })
+      this.reason('refresh', `forge check failed — ${String(err).slice(0, 100)}`, {}, 'warn')
     }
 
     // Project tracker: assigned work (epics excluded, disabled projects skipped)
@@ -387,16 +391,16 @@ export class Brain extends EventEmitter {
   }
 
   // ---- helpers ----
-  private ensureRepo(nameWithOwner: string) {
+  private ensureRepo(nameWithOwner: string, forge = 'github') {
     const existing = store.getRepoByName(nameWithOwner)
     if (existing) {
       if (existing.cloneState !== 'present') this.tryDetectClone(existing.id, nameWithOwner)
       return store.getRepoByName(nameWithOwner)!
     }
-    const repo = store.upsertRepo({
-      name: nameWithOwner,
-      remote: `https://github.com/${nameWithOwner}.git`
-    })
+    const remote = forge === 'azuredevops'
+      ? `https://dev.azure.com/${nameWithOwner.split('/').slice(0, -1).join('/')}/_git/${nameWithOwner.split('/').pop()}`
+      : `https://github.com/${nameWithOwner}.git`
+    const repo = store.upsertRepo({ name: nameWithOwner, remote, forge })
     this.tryDetectClone(repo.id, nameWithOwner)
     return store.getRepoByName(nameWithOwner)!
   }

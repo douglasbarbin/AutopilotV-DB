@@ -1,6 +1,7 @@
 import { exec } from './util/exec'
 import { getSettings, listHarnesses } from './store'
 import { pingEndpoint } from './localmodel/manager'
+import { activeForge } from './forges'
 import type { EnvItem } from '@shared/types/ipc'
 
 async function present(cmd: string): Promise<{ found: boolean; version: string }> {
@@ -39,22 +40,95 @@ export async function checkEnvironment(): Promise<EnvItem[]> {
     install: 'Install Xcode Command Line Tools (xcode-select --install) or git'
   })
 
-  const gh = await present('gh')
-  let ghAuthed: boolean | null = null
-  if (gh.found) ghAuthed = (await exec('gh', ['auth', 'status'], { timeoutMs: 8000 })).code === 0
-  items.push({
-    id: 'gh',
-    label: 'GitHub CLI (gh)',
-    role: 'required',
-    present: gh.found,
-    authed: ghAuthed,
-    detail: !gh.found
-      ? 'not found on PATH'
-      : ghAuthed
-        ? gh.version
-        : 'installed but not authenticated — run: gh auth login',
-    install: 'https://cli.github.com'
-  })
+  // --- active code forge ---
+  // The active forge dictates which CLI is required. We still show `gh` as a
+  // baseline health row (the tracker GitHub Projects and some discovery fall
+  // backs still go through it), but its role relaxes to "optional" when the
+  // active forge is something else.
+  const activeForgeId = settings.forge
+  if (activeForgeId === 'github') {
+    const gh = await present('gh')
+    let ghAuthed: boolean | null = null
+    if (gh.found) ghAuthed = (await exec('gh', ['auth', 'status'], { timeoutMs: 8000 })).code === 0
+    items.push({
+      id: 'gh',
+      label: 'GitHub CLI (gh)',
+      role: 'required',
+      present: gh.found,
+      authed: ghAuthed,
+      detail: !gh.found
+        ? 'not found on PATH'
+        : ghAuthed
+          ? gh.version
+          : 'installed but not authenticated — run: gh auth login',
+      install: 'https://cli.github.com'
+    })
+  } else if (activeForgeId === 'azuredevops') {
+    // The Azure DevOps forge uses the REST API directly — no `az` CLI is
+    // required. We do a lightweight auth check via /_apis/projects.
+    const { config: forgeConfig } = activeForge(settings)
+    const org = (forgeConfig.org ?? '').trim()
+    const pat = forgeConfig.pat ?? ''
+    let reachable = false
+    if (org && pat) {
+      try {
+        const ac = new AbortController()
+        const t = setTimeout(() => ac.abort(), 4000)
+        const r = await fetch(
+          `https://dev.azure.com/${encodeURIComponent(org)}/_apis/projects?api-version=7.1-preview.4`,
+          {
+            method: 'GET',
+            headers: { Authorization: 'Basic ' + Buffer.from(':' + pat).toString('base64') },
+            signal: ac.signal
+          }
+        )
+        clearTimeout(t)
+        reachable = r.ok
+      } catch {
+        reachable = false
+      }
+    }
+    items.push({
+      id: 'azuredevops',
+      label: 'Azure DevOps',
+      role: 'required',
+      present: !!org && !!pat,
+      authed: org && pat ? reachable : null,
+      detail: !org
+        ? 'no organization set in Forge settings'
+        : !pat
+          ? 'no PAT set in Forge settings'
+          : reachable
+            ? `dev.azure.com/${org} reachable`
+            : `unreachable or unauthorized: dev.azure.com/${org}`,
+      install: 'Create a PAT at dev.azure.com → User settings → Personal access tokens (Code Read & Write scope).'
+    })
+    // GitHub CLI isn't needed for the Azure DevOps forge, but still useful
+    // for the GitHub Projects tracker — surface it as optional.
+    const gh = await present('gh')
+    if (gh.found) {
+      items.push({
+        id: 'gh',
+        label: 'GitHub CLI (gh)',
+        role: 'optional',
+        present: gh.found,
+        authed: null,
+        detail: gh.version || 'found',
+        install: 'https://cli.github.com'
+      })
+    }
+  } else {
+    // Unknown forge: show a placeholder so the user knows where to look.
+    items.push({
+      id: 'forge',
+      label: `Code forge: ${activeForgeId}`,
+      role: 'required',
+      present: false,
+      authed: null,
+      detail: 'no integration registered for this forge id',
+      install: 'Pick GitHub or Azure DevOps in Forge settings.'
+    })
+  }
 
   // --- active tracker ---
   if (settings.tracker === 'jira') {
@@ -86,6 +160,42 @@ export async function checkEnvironment(): Promise<EnvItem[]> {
       authed: ep ? ok : null,
       detail: !ep ? 'no endpoint set in Tracker settings' : ok ? `reachable: ${ep}` : `unreachable: ${ep}`,
       install: 'Point Tracker settings at your Vikunja instance'
+    })
+  } else if (settings.tracker === 'azuredevops') {
+    const org = (settings.trackerConfig?.azuredevops?.org ?? '').trim()
+    const pat = settings.trackerConfig?.azuredevops?.pat ?? ''
+    const configured = !!org && !!pat
+    let reachable = false
+    if (configured) {
+      try {
+        const ac = new AbortController()
+        const t = setTimeout(() => ac.abort(), 4000)
+        const r = await fetch(
+          `https://dev.azure.com/${encodeURIComponent(org)}/_apis/projects?api-version=7.1-preview.4`,
+          {
+            method: 'GET',
+            headers: { Authorization: 'Basic ' + Buffer.from(':' + pat).toString('base64') },
+            signal: ac.signal
+          }
+        )
+        clearTimeout(t)
+        reachable = r.ok
+      } catch {
+        reachable = false
+      }
+    }
+    items.push({
+      id: 'azuredevops',
+      label: 'Azure DevOps',
+      role: 'required',
+      present: configured,
+      authed: configured ? reachable : null,
+      detail: !configured
+        ? 'no organization or PAT set in Tracker settings'
+        : reachable
+          ? `dev.azure.com/${org} reachable`
+          : `unreachable or unauthorized: dev.azure.com/${org}`,
+      install: 'Create a PAT at dev.azure.com → User settings → Personal access tokens (Work Items scope).'
     })
   }
   // ghproject needs only gh, already checked.

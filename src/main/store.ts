@@ -198,11 +198,15 @@ export function upsertRepo(r: {
   remote: string
   defaultBranch?: string
   path?: string | null
+  /** Forge that owns this repo. Defaults to the active forge; pass explicitly
+   *  when the caller knows better (e.g. migrating between forges). */
+  forge?: string
 }): Repo {
+  const forge = r.forge ?? getSettings().forge
   getDb()
     .prepare(
-      `INSERT INTO repos (name, remote, default_branch, path, clone_state)
-       VALUES (@name, @remote, @default_branch, @path, @clone_state)
+      `INSERT INTO repos (name, remote, default_branch, path, clone_state, forge)
+       VALUES (@name, @remote, @default_branch, @path, @clone_state, @forge)
        ON CONFLICT(name) DO UPDATE SET remote = @remote`
     )
     .run({
@@ -210,7 +214,8 @@ export function upsertRepo(r: {
       remote: r.remote,
       default_branch: r.defaultBranch ?? 'main',
       path: r.path ?? null,
-      clone_state: r.path ? 'present' : 'missing'
+      clone_state: r.path ? 'present' : 'missing',
+      forge
     })
   return getRepoByName(r.name)!
 }
@@ -233,7 +238,8 @@ function rowToRepo(r: any): Repo {
     path: r.path,
     remote: r.remote,
     defaultBranch: r.default_branch,
-    cloneState: r.clone_state
+    cloneState: r.clone_state,
+    forge: r.forge ?? 'github'
   }
 }
 
@@ -428,7 +434,14 @@ export function resolveProjectRepo(projectKey: string): Repo | null {
   const name = row?.repo_name
   if (!name) return null
   let repo = getRepoByName(name)
-  if (!repo) repo = upsertRepo({ name, remote: `https://github.com/${name}.git` })
+  if (!repo) {
+    const forge = getSettings().forge
+    repo = upsertRepo({
+      name,
+      remote: forge === 'azuredevops' ? '' : `https://github.com/${name}.git`,
+      forge
+    })
+  }
   if (repo.cloneState !== 'present') {
     const candidate = join(getSettings().cloneParentDir, name.split('/').pop()!)
     if (existsSync(join(candidate, '.git'))) {
@@ -472,12 +485,18 @@ export function upsertPrReview(p: {
     reRequested = last?.action === 'approve' || last?.action === 'request_changes'
   }
 
+  // The PR's forge is whichever forge owns its repo at write time. This is
+  // what lets the renderer + the review orchestrator route calls to the
+  // right adapter without consulting the (potentially stale) active setting.
+  const repo = getRepo(p.repoId)
+  const forge = repo?.forge ?? 'github'
+
   getDb()
     .prepare(
-      `INSERT INTO pr_reviews (pr_number, repo_id, title, author, branch, url)
-       VALUES (@pr_number, @repo_id, @title, @author, @branch, @url)
+      `INSERT INTO pr_reviews (pr_number, repo_id, title, author, branch, url, forge)
+       VALUES (@pr_number, @repo_id, @title, @author, @branch, @url, @forge)
        ON CONFLICT(repo_id, pr_number) DO UPDATE SET
-         title = @title, author = @author, branch = @branch, url = @url, updated_at = datetime('now')`
+         title = @title, author = @author, branch = @branch, url = @url, forge = @forge, updated_at = datetime('now')`
     )
     .run({
       pr_number: p.prNumber,
@@ -485,7 +504,8 @@ export function upsertPrReview(p: {
       title: p.title,
       author: p.author,
       branch: p.branch,
-      url: p.url
+      url: p.url,
+      forge
     })
   if (reRequested && prev) resetPrReview(prev.id)
   return { review: getPrReviewByNumber(p.repoId, p.prNumber)!, reRequested }
@@ -543,7 +563,8 @@ function rowToPrReview(r: any): PrReview {
     claimState: r.claim_state,
     sessionId: r.session_id,
     discoveredAt: r.discovered_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    forge: r.forge ?? repo?.forge ?? 'github'
   }
 }
 

@@ -78,6 +78,40 @@ export const TRACKERS: TrackerDescriptor[] = [
         hint: 'Filter tasks to this username; defaults to the authenticated user.'
       }
     ]
+  },
+  {
+    id: 'azuredevops',
+    displayName: 'Azure DevOps',
+    blurb: 'Azure DevOps Boards via the REST API using a Personal Access Token (PAT).',
+    fields: [
+      {
+        key: 'org',
+        label: 'Organization',
+        type: 'text',
+        placeholder: 'your-org',
+        hint: 'The slug in dev.azure.com/{org}.'
+      },
+      {
+        key: 'project',
+        label: 'Project (optional)',
+        type: 'text',
+        placeholder: 'YourProject',
+        hint: 'Limit to a single project; leave blank to query across all projects the PAT can see.'
+      },
+      {
+        key: 'pat',
+        label: 'Personal Access Token',
+        type: 'password',
+        hint: 'Needs Work Items (Read & Write) scope. Create one at dev.azure.com → User settings → PATs.'
+      },
+      {
+        key: 'assigneeFilter',
+        label: 'Assignee filter (optional)',
+        type: 'text',
+        placeholder: 'user@example.com',
+        hint: 'Identity (email or unique name) to filter by; defaults to the authenticated user via WIQL @Me.'
+      }
+    ]
   }
 ]
 
