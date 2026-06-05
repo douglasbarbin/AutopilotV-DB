@@ -15,8 +15,8 @@ import { notifier } from '../notify'
 import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
 import type { TrackerTask, Repo, Settings } from '@shared/types/domain'
+import { buildDevStartPrompt, PR_URL_FILE, sanitizeTitle } from './prompt'
 
-const PR_URL_FILE = '.pr-url'
 const REVISE_FILE = '.revise'
 const ADDRESS_FILE = '.address-comments'
 
@@ -115,15 +115,14 @@ export async function startDevTask(task: TrackerTask): Promise<number | null> {
     log.warn('tracker transition to In Progress failed', { key: task.issueKey, err: String(err) })
   }
 
-  const prompt =
-    `You are implementing tracker task ${task.issueKey}: "${task.title}".\n` +
-    `Work in this worktree on branch ${branch}. Implement the change, commit it, then open a ` +
-    `DRAFT pull request against ${repo.defaultBranch} with \`gh pr create --draft\`. ` +
-    `Only open the PR once the implementation is complete. ` +
-    `As the very last step, write the full PR URL to a file named ${PR_URL_FILE} in this directory ` +
-    `(e.g. \`gh pr view --json url -q .url > ${PR_URL_FILE}\`). That file is how the orchestrator ` +
-    `detects the PR — do not skip it.\n\n` +
-    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
+  const prompt = buildDevStartPrompt({
+    issueKey: task.issueKey,
+    title: task.title,
+    branch,
+    baseBranch: repo.defaultBranch,
+    repoName: repo.name,
+    worktreePath: worktree.path
+  })
 
   const sessionId = sessionManager.spawn({
     kind: 'dev',
@@ -132,7 +131,7 @@ export async function startDevTask(task: TrackerTask): Promise<number | null> {
     cwd: worktree.path,
     env: process.env,
     worktreeId: worktree.id,
-    title: `${task.issueKey} ${task.title}`.slice(0, 80),
+    title: `${task.issueKey} ${sanitizeTitle(task.title)}`.slice(0, 80),
     initialInput: prompt
   })
   store.attachWorktreeSession(worktree.id, sessionId)
