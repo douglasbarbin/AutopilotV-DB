@@ -87,6 +87,42 @@ export async function checkEnvironment(): Promise<EnvItem[]> {
       detail: !ep ? 'no endpoint set in Tracker settings' : ok ? `reachable: ${ep}` : `unreachable: ${ep}`,
       install: 'Point Tracker settings at your Vikunja instance'
     })
+  } else if (settings.tracker === 'azuredevops') {
+    const org = (settings.trackerConfig?.azuredevops?.org ?? '').trim()
+    const pat = settings.trackerConfig?.azuredevops?.pat ?? ''
+    const configured = !!org && !!pat
+    let reachable = false
+    if (configured) {
+      try {
+        const ac = new AbortController()
+        const t = setTimeout(() => ac.abort(), 4000)
+        const r = await fetch(
+          `https://dev.azure.com/${encodeURIComponent(org)}/_apis/projects?api-version=7.1-preview.4`,
+          {
+            method: 'GET',
+            headers: { Authorization: 'Basic ' + Buffer.from(':' + pat).toString('base64') },
+            signal: ac.signal
+          }
+        )
+        clearTimeout(t)
+        reachable = r.ok
+      } catch {
+        reachable = false
+      }
+    }
+    items.push({
+      id: 'azuredevops',
+      label: 'Azure DevOps',
+      role: 'required',
+      present: configured,
+      authed: configured ? reachable : null,
+      detail: !configured
+        ? 'no organization or PAT set in Tracker settings'
+        : reachable
+          ? `dev.azure.com/${org} reachable`
+          : `unreachable or unauthorized: dev.azure.com/${org}`,
+      install: 'Create a PAT at dev.azure.com → User settings → Personal access tokens (Work Items scope).'
+    })
   }
   // ghproject needs only gh, already checked.
 
