@@ -80,6 +80,40 @@ export interface EnvItem {
   install: string // hint / URL
 }
 
+/**
+ * Which slice(s) of the AppState changed. The renderer uses this to know which
+ * sub-components need to re-render. Slices are shallow-compared (a new array
+ * reference for collections) so a hook like `useTasks()` can re-render only
+ * its callers when tasks changes, and `useSessions()` callers stay quiet.
+ */
+export type StateSlice =
+  | 'tasks'
+  | 'trackerProjects'
+  | 'prReviews'
+  | 'reviews'
+  | 'sessions'
+  | 'worktrees'
+  | 'harnesses'
+  | 'repos'
+  | 'integrations'
+  | 'settings'
+  | 'events'
+  | 'brainNotes'
+  | 'brain'
+
+/**
+ * A small change description the main process pushes instead of the full
+ * AppState. The full snapshot is still available via `snapshot()` for boot
+ * and reconnect. The renderer keeps its local copy of the previous state and
+ * applies the changed slices in place — re-render only fires for components
+ * subscribed to a slice that was actually listed.
+ */
+export interface StateDelta {
+  version: number
+  changed: StateSlice[]
+  state: AppState
+}
+
 // The typed surface the preload exposes on window.autopilotv.
 export interface AutopilotVApi {
   version: number
@@ -117,6 +151,12 @@ export interface AutopilotVApi {
   getDiff(opts: { worktreeId?: number; prNumber?: number; repoId?: number }): Promise<string>
   // subscriptions return an unsubscribe fn
   onState(cb: (state: AppState) => void): () => void
+  /**
+   * Subscribe to slice-scoped state changes. Returns an unsubscribe fn.
+   * The callback receives the full state and the list of changed slices; it
+   * can re-render only when the slice it cares about is in `changed`.
+   */
+  onStateDelta(cb: (delta: StateDelta) => void): () => void
   onSessionOutput(cb: (chunk: SessionOutputChunk) => void): () => void
   onNotification(cb: (n: NotificationPayload) => void): () => void
   onOpenAbout(cb: () => void): () => void

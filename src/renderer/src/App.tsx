@@ -12,6 +12,7 @@ import { Onboarding } from './components/Onboarding'
 import { About } from './components/About'
 import { Icon } from './components/Icon'
 import { Starfield } from './components/Starfield'
+import { INTEGRATION_STATUS_COLOR } from './theme'
 import logoUrl from '../../../build/icon.png'
 import { api } from './api'
 import type { NotificationPayload } from '@shared/types/ipc'
@@ -26,13 +27,6 @@ const NAV: { id: Tab; label: string; icon: Parameters<typeof Icon>[0]['name'] }[
   { id: 'events', label: 'Activity', icon: 'activity' },
   { id: 'settings', label: 'Settings', icon: 'settings' }
 ]
-
-const STATUS_COLOR: Record<string, string> = {
-  ok: 'var(--green)',
-  degraded: 'var(--yellow)',
-  down: 'var(--red)',
-  unknown: 'var(--comment)'
-}
 
 export function App() {
   const state = useAppState()
@@ -136,7 +130,7 @@ export function App() {
                     : name
               return (
                 <span className="integration" key={name} title={i?.detail ?? 'not checked'}>
-                  <span className="status-dot" style={{ background: STATUS_COLOR[status] }} />
+                  <span className="status-dot" style={{ background: INTEGRATION_STATUS_COLOR[status] }} />
                   {label}
                 </span>
               )

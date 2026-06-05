@@ -4,6 +4,7 @@ import { exec, execOrThrow } from '../util/exec'
 import { log } from '../log'
 import * as store from '../store'
 import type { Repo, Worktree } from '@shared/types/domain'
+import { ALL_SIGNALS } from './signals'
 
 const AGENTS_BEGIN = '<!-- TASKMAN:BEGIN injected coding standards (not committed) -->'
 const AGENTS_END = '<!-- TASKMAN:END -->'
@@ -188,7 +189,7 @@ export async function provisionDevWorktree(repo: Repo, branch: string): Promise<
     cwd
   })
   await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
-  await addToGitExclude(dest, ['.pr-url', '.revise', '.address-comments'])
+  await addToGitExclude(dest, ALL_SIGNALS)
   await writeAdjacentWorkFile(dest, repo.id)
   const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
   store.recordEvent('worktree.provisioned', { repo: repo.name, branch, path: dest })
@@ -223,7 +224,7 @@ export async function provisionDevWorktreeForBranch(repo: Repo, branch: string):
     cwd
   })
   await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
-  await addToGitExclude(dest, ['.pr-url', '.revise', '.address-comments'])
+  await addToGitExclude(dest, ALL_SIGNALS)
   await writeAdjacentWorkFile(dest, repo.id)
   const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
   store.recordEvent('worktree.provisioned', { repo: repo.name, branch, path: dest, adopted: true })

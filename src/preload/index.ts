@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { Channels, IPC_VERSION } from '@shared/types/ipc'
-import type { AutopilotVApi, WorkRef, SessionOutputChunk, NotificationPayload } from '@shared/types/ipc'
+import type { AutopilotVApi, WorkRef, SessionOutputChunk, NotificationPayload, StateDelta } from '@shared/types/ipc'
 import type { AppState, HarnessConfig, ReviewAction, Settings } from '@shared/types/domain'
 
 const api: AutopilotVApi = {
@@ -59,6 +59,11 @@ const api: AutopilotVApi = {
     const fn = (_e: unknown, state: AppState) => cb(state)
     ipcRenderer.on(Channels.evtState, fn)
     return () => ipcRenderer.removeListener(Channels.evtState, fn)
+  },
+  onStateDelta: (cb: (delta: StateDelta) => void) => {
+    const fn = (_e: unknown, delta: StateDelta) => cb(delta)
+    ipcRenderer.on('state.delta', fn)
+    return () => ipcRenderer.removeListener('state.delta', fn)
   },
   onSessionOutput: (cb: (chunk: SessionOutputChunk) => void) => {
     const fn = (_e: unknown, chunk: SessionOutputChunk) => cb(chunk)

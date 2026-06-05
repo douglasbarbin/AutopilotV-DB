@@ -8,6 +8,7 @@ import type {
   ForgePr,
   PrReadiness
 } from './types'
+import { apiFetch, basicAuthHeader } from './_base'
 
 /**
  * Azure DevOps forge adapter.
@@ -37,39 +38,14 @@ import type {
  *                    defaults to the authenticated user
  */
 
-function authHeader(pat: string): string {
-  return 'Basic ' + Buffer.from(':' + pat).toString('base64')
-}
-
-async function apiFetch(
+function adoFetch<T = unknown>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   url: string,
   pat: string,
   body?: unknown,
   timeoutMs = 20_000
-): Promise<any> {
-  const ac = new AbortController()
-  const timer = setTimeout(() => ac.abort(), timeoutMs)
-  try {
-    const resp = await fetch(url, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': ['POST', 'PUT', 'PATCH'].includes(method) ? 'application/json' : 'application/json',
-        Authorization: authHeader(pat)
-      },
-      signal: ac.signal,
-      body: body !== undefined ? JSON.stringify(body) : undefined
-    })
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}${text ? `: ${text.slice(0, 160)}` : ''}`)
-    }
-    if (resp.status === 204) return null
-    return await resp.json()
-  } finally {
-    clearTimeout(timer)
-  }
+): Promise<T | null> {
+  return apiFetch<T>({ method, url, headers: { Authorization: basicAuthHeader(pat) }, body, timeoutMs })
 }
 
 /** Parse `org/Project/repo` (and tolerate the cross-project form `org/repo` by
@@ -103,7 +79,7 @@ async function resolveRepoId(
   const hit = repoIdCache.get(key)
   if (hit) return hit
   const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${encodeURIComponent(repo)}?api-version=7.1-preview.1`
-  const r = await apiFetch('GET', url, pat)
+  const r = (await adoFetch('GET', url, pat)) as any
   const id = String(r?.id ?? '')
   if (id) repoIdCache.set(key, id)
   return id
@@ -113,7 +89,7 @@ async function getAuthenticatedUserId(org: string, pat: string): Promise<string>
   // connectionData returns the authenticated user's descriptor + id without
   // requiring the Graph scope.
   const url = `${baseUrl(org)}/_apis/connectionData?api-version=7.1-preview.1`
-  const r = await apiFetch('GET', url, pat, undefined, 6000)
+  const r = (await adoFetch('GET', url, pat, undefined, 6000)) as any
   return String(r?.authenticatedUser?.id ?? '')
 }
 
@@ -198,8 +174,8 @@ export const azureDevOpsForge: Forge = {
       // below applies the reviewer constraint), but still page so we don't miss.
       try {
         const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/pullRequests?api-version=7.1-preview.1&searchCriteria.status=active&searchCriteria.targetRefName=&$top=50`
-        const r = await apiFetch('GET', url, pat)
-        const arr: any[] = Array.isArray(r) ? r : Array.isArray(r?.value) ? r.value : []
+      const r = (await adoFetch('GET', url, pat)) as any
+      const arr: any[] = Array.isArray(r) ? r : Array.isArray(r?.value) ? r.value : []
         for (const row of arr) {
           // Filter: must be from this repo.
           if ((row?.repository?.name ?? '').toLowerCase() !== repo.toLowerCase()) continue
@@ -243,7 +219,7 @@ export const azureDevOpsForge: Forge = {
     }
     const repoId = await resolveRepoId(org, project, repo, pat)
     const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}?api-version=7.1-preview.1`
-    const r = await apiFetch('GET', url, pat)
+    const r = (await adoFetch('GET', url, pat)) as any
     return {
       number: Number(r.pullRequestId),
       title: r.title ?? '',
@@ -262,33 +238,17 @@ export const azureDevOpsForge: Forge = {
       throw new Error('azure devops: org, project, pat, and a {org/Project/repo} name are required')
     }
     const repoId = await resolveRepoId(org, project, repo, pat)
-    // Pull the most recent iteration and use the diffs endpoint to render a
-    // unified diff. Falls back to the commits list if the diff can't be
-    // resolved (e.g. permission issues).
-    const iterUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/iterations?api-version=7.1-preview.1`
-    const iters = await apiFetch('GET', iterUrl, pat)
-    const iterId = Array.isArray(iters) && iters.length > 0 ? iters[iters.length - 1].id : null
-    if (iterId == null) {
-      // No iterations: return an empty diff rather than throw.
-      return ''
-    }
-    const diffUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/iterations/${iterId}/changes?api-version=7.1-preview.1&$top=200`
-    const changes = await apiFetch('GET', diffUrl, pat)
-    const entries: any[] = Array.isArray(changes) ? changes : Array.isArray(changes?.changeEntries) ? changes.changeEntries : []
+    // ADO doesn't expose a `text/vnd.git-diff` content type on its PR endpoints;
+    // the closest thing is /pullRequests/{id}/diffs which returns structured
+    // changeEntries with per-file lines. We reconstruct a unified diff from
+    // those entries so the review harness has real content to reason about
+    // (the previous placeholder was just `diff --git a/X b/X` headers with no
+    // hunk content, which left the review agent effectively blind).
+    const diffUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/diffs?api-version=7.1-preview.1&diffType=unified`
+    const diff = await adoFetch<any>('GET', diffUrl, pat)
+    const entries: any[] = Array.isArray(diff?.changeEntries) ? diff.changeEntries : []
     if (entries.length === 0) return ''
-    // Render a diff-ish line per change. This is a coarse approximation but
-    // gives the review harness enough to chew on.
-    const lines: string[] = []
-    for (const e of entries) {
-      const item = e?.item ?? {}
-      const path = item?.path ?? '<unknown>'
-      const changeType = (e?.changeType ?? 'edit').toLowerCase()
-      lines.push(`diff --git a/${path} b/${path}`)
-      lines.push(`--- a/${path}`)
-      lines.push(`+++ b/${path}`)
-      lines.push(`@@ change: ${changeType} @@`)
-    }
-    return lines.join('\n') + '\n'
+    return reconstructUnifiedDiff(entries)
   },
 
   async createPr(
@@ -324,7 +284,7 @@ export const azureDevOpsForge: Forge = {
       description: opts.body,
       isDraft: !!opts.draft
     }
-    const r = await apiFetch('POST', url, pat, body)
+    const r = (await adoFetch('POST', url, pat, body)) as any
     return r?.url ?? buildPrUrl(org, project, repoName, Number(r?.pullRequestId ?? 0))
   },
 
@@ -336,13 +296,13 @@ export const azureDevOpsForge: Forge = {
     try {
       const repoId = await resolveRepoId(org, project, repo, pat)
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests?api-version=7.1-preview.1&searchCriteria.sourceRefName=refs/heads/${encodeURIComponent(branch)}&searchCriteria.status=active`
-      const r = await apiFetch('GET', url, pat)
+      const r = (await adoFetch('GET', url, pat)) as any
       const arr: any[] = Array.isArray(r) ? r : Array.isArray(r?.value) ? r.value : []
       const row = arr[0]
       if (!row) {
         // Fallback: check all (open + closed) so we can still surface a closed PR.
         const urlAll = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests?api-version=7.1-preview.1&searchCriteria.sourceRefName=refs/heads/${encodeURIComponent(branch)}&searchCriteria.status=all`
-        const rAll = await apiFetch('GET', urlAll, pat)
+        const rAll = (await adoFetch('GET', urlAll, pat)) as any
         const arrAll: any[] = Array.isArray(rAll) ? rAll : Array.isArray(rAll?.value) ? rAll.value : []
         const rowAll = arrAll[0]
         if (!rowAll) return null
@@ -373,7 +333,7 @@ export const azureDevOpsForge: Forge = {
     try {
       const repoId = await resolveRepoId(org, project, repo, pat)
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}?api-version=7.1-preview.1`
-      const r = await apiFetch('GET', url, pat)
+      const r = (await adoFetch('GET', url, pat)) as any
       return {
         number: Number(r.pullRequestId),
         url: r.url ?? buildPrUrl(org, project, repo, number),
@@ -398,7 +358,7 @@ export const azureDevOpsForge: Forge = {
       // Azure DevOps search supports a text query; the issue key is unique
       // enough to find the matching PR by title.
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests?api-version=7.1-preview.1&searchCriteria.text=${encodeURIComponent(issueKey)}&searchCriteria.status=active`
-      const r = await apiFetch('GET', url, pat)
+      const r = (await adoFetch('GET', url, pat)) as any
       const arr: any[] = Array.isArray(r) ? r : Array.isArray(r?.value) ? r.value : []
       const lower = issueKey.toLowerCase()
       // Prefer a branch that carries the key; otherwise the first (most recent).
@@ -428,7 +388,7 @@ export const azureDevOpsForge: Forge = {
     const repoId = await resolveRepoId(org, project, repo, pat)
     const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}?api-version=7.1-preview.1`
     try {
-      await apiFetch('PATCH', url, pat, [
+      await adoFetch('PATCH', url, pat, [
         { op: 'replace', path: '/isDraft', value: false }
       ])
     } catch (err) {
@@ -445,7 +405,7 @@ export const azureDevOpsForge: Forge = {
     }
     const repoId = await resolveRepoId(org, project, repo, pat)
     const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}?api-version=7.1-preview.1`
-    await apiFetch('PUT', url, pat, {
+    await adoFetch('PUT', url, pat, {
       status: 'completed',
       completionOptions: {
         mergeStrategy: 'squash',
@@ -470,7 +430,7 @@ export const azureDevOpsForge: Forge = {
     }
     const repoId = await resolveRepoId(org, project, repo, pat)
     const prUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}?api-version=7.1-preview.1`
-    const pr = await apiFetch('GET', prUrl, pat)
+    const pr = (await adoFetch('GET', prUrl, pat)) as any
     const state = normalizePrState(pr.status)
     if (state !== 'OPEN') {
       return { state, mergeable: false, statusOk: true, approvals: 0, changesRequested: false, unresolvedThreads: 0 }
@@ -484,7 +444,7 @@ export const azureDevOpsForge: Forge = {
     let approvals = 0
     let changesRequested = false
     try {
-      const revs: AdoReviewer[] = (await apiFetch('GET', reviewersUrl, pat)) ?? []
+      const revs: AdoReviewer[] = ((await adoFetch('GET', reviewersUrl, pat)) ?? []) as any
       for (const r of revs) {
         if (isApprovedVote(r.vote)) approvals++
         if (isRejectingVote(r.vote)) changesRequested = true
@@ -497,7 +457,7 @@ export const azureDevOpsForge: Forge = {
     let unresolvedThreads = 0
     try {
       const threadsUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/threads?api-version=7.1-preview.1`
-      const threads = (await apiFetch('GET', threadsUrl, pat)) ?? []
+      const threads = ((await adoFetch('GET', threadsUrl, pat)) ?? []) as any
       const arr: any[] = Array.isArray(threads) ? threads : Array.isArray(threads?.value) ? threads.value : []
       unresolvedThreads = arr.filter((t) => {
         const s = String(t?.status ?? '').toLowerCase()
@@ -530,7 +490,7 @@ export const azureDevOpsForge: Forge = {
       // A "comment-only" review in Azure DevOps is a new thread on the PR.
       // It does NOT change the reviewer's vote.
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/threads?api-version=7.1-preview.1`
-      await apiFetch('POST', url, pat, {
+      await adoFetch('POST', url, pat, {
         comments: [
           {
             content: body,
@@ -550,23 +510,23 @@ export const azureDevOpsForge: Forge = {
       throw new Error('azure devops: could not determine the authenticated user id from /connectionData')
     }
     const reviewersUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/reviewers?api-version=7.1-preview.1`
-    const reviewers: AdoReviewer[] = (await apiFetch('GET', reviewersUrl, pat)) ?? []
+    const reviewers: AdoReviewer[] = ((await adoFetch('GET', reviewersUrl, pat)) ?? []) as any
     const me = reviewers.find((r) => r.id === userId) ?? null
     if (me) {
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/reviewers/${encodeURIComponent(me.id)}?api-version=7.1-preview.1`
-      await apiFetch('PUT', url, pat, { vote: VOTE[action] })
+      await adoFetch('PUT', url, pat, { vote: VOTE[action] })
     } else {
       // No reviewer row exists for us yet (we haven't been added to the PR as
       // a reviewer). Create one with the appropriate vote.
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/reviewers?api-version=7.1-preview.1`
-      await apiFetch('POST', url, pat, { id: userId, vote: VOTE[action] })
+      await adoFetch('POST', url, pat, { id: userId, vote: VOTE[action] })
     }
     // Always add a thread with the body so the user sees their feedback even
     // when voting.
     if (body.trim().length > 0) {
       const threadUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/threads?api-version=7.1-preview.1`
       try {
-        await apiFetch('POST', threadUrl, pat, {
+        await adoFetch('POST', threadUrl, pat, {
           comments: [{ content: body, commentType: 'text' }],
           status: 'active'
         })
@@ -585,7 +545,7 @@ export const azureDevOpsForge: Forge = {
     if (!pat) return { ok: false, detail: 'no PAT set in Forge settings' }
     try {
       const url = `${baseUrl(org)}/_apis/projects?api-version=7.1-preview.4`
-      const r = await apiFetch('GET', url, pat, undefined, 6000)
+      const r = (await adoFetch('GET', url, pat, undefined, 6000)) as any
       const count = Array.isArray(r?.value) ? r.value.length : 0
       return { ok: true, detail: `dev.azure.com/${org} (${count} project${count === 1 ? '' : 's'})` }
     } catch (err) {
@@ -601,4 +561,62 @@ export { buildPrUrl, splitRepo }
  *  public `Forge` contract; only used by unit tests to keep them hermetic. */
 export function __resetRepoIdCache(): void {
   repoIdCache.clear()
+}
+
+/**
+ * Reconstruct a unified diff from ADO's structured `changeEntries` response.
+ * ADO's diff endpoint returns changeEntries with per-file `item.content.lines`
+ * of the form `{lineType: 'context'|'add'|'delete', line: '...', originalLine?, modifiedLine?}`.
+ * We render those back to the standard `diff --git` / `@@ -a,b +c,d @@` format
+ * the review harness expects.
+ *
+ * Best-effort: if `originalLine`/`modifiedLine` are absent we synthesize running
+ * counters from the lineTypes so the hunk header still has plausible numbers.
+ */
+export function reconstructUnifiedDiff(entries: any[]): string {
+  const out: string[] = []
+  for (const e of entries) {
+    const item = e?.item ?? {}
+    const originalPath = e?.originalPath ?? item?.originalPath ?? item?.path ?? '<unknown>'
+    const modifiedPath = e?.modifiedPath ?? item?.modifiedPath ?? item?.path ?? '<unknown>'
+    const changeType = (e?.changeType ?? 'edit').toLowerCase()
+    const lines: any[] = Array.isArray(item?.content?.lines) ? item.content.lines : []
+
+    out.push(`diff --git a/${originalPath} b/${modifiedPath}`)
+    out.push(`--- a/${originalPath}`)
+    out.push(`+++ b/${modifiedPath}`)
+
+    if (lines.length === 0) {
+      out.push(`@@ change: ${changeType} @@`)
+      continue
+    }
+
+    // Walk once to bucket lines by source-side (original vs modified) so the
+    // hunk header can carry the right `-a,b +c,d` counts. ADO's line objects
+    // are usually already in diff order; we just count.
+    let origStart = 0
+    let origCount = 0
+    let modStart = 0
+    let modCount = 0
+    for (const l of lines) {
+      const t = String(l?.lineType ?? '').toLowerCase()
+      if (t === 'context' || t === 'delete') origCount++
+      if (t === 'context' || t === 'add') modCount++
+      if (origStart === 0 && typeof l?.originalLine === 'number') origStart = l.originalLine
+      if (modStart === 0 && typeof l?.modifiedLine === 'number') modStart = l.modifiedLine
+    }
+    if (origStart === 0) origStart = 1
+    if (modStart === 0) modStart = 1
+    out.push(`@@ -${origStart},${origCount} +${modStart},${modCount} @@`)
+
+    for (const l of lines) {
+      const t = String(l?.lineType ?? 'context').toLowerCase()
+      const text = String(l?.line ?? '')
+      if (t === 'add') out.push('+' + text)
+      else if (t === 'delete') out.push('-' + text)
+      else out.push(' ' + text)
+    }
+    out.push('')
+  }
+  return out.join('\n')
 }

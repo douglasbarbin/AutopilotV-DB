@@ -1,4 +1,8 @@
-export const PR_URL_FILE = '.pr-url'
+import { SIGNAL } from '../worktree/signals'
+export { SIGNAL }
+
+// Back-compat: existing tests / callers may import PR_URL_FILE.
+export const PR_URL_FILE = SIGNAL.PR_URL
 
 /**
  * Make a tracker task title safe to embed in a prompt. Titles come from

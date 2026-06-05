@@ -1,37 +1,26 @@
-import { existsSync, readFileSync, rmSync } from 'fs'
-import { join } from 'path'
 import { log } from '../log'
 import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
 import {
   provisionDevWorktree,
   provisionDevWorktreeForBranch,
-  pruneWorktree,
-  discardWorktree,
-  writeAdjacentWorkFile
+  discardWorktree
 } from '../worktree/manager'
 import { forgeForRepo, type AdoptablePr } from '../forges'
-import { notifier } from '../notify'
 import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
 import type { TrackerTask, Repo, Settings } from '@shared/types/domain'
-import { buildDevStartPrompt, PR_URL_FILE, sanitizeTitle } from './prompt'
+import { buildDevStartPrompt, sanitizeTitle } from './prompt'
+import { ADVANCE_FNS, finishMerged as finishMergedPhase } from './phases'
 
-const REVISE_FILE = '.revise'
-const ADDRESS_FILE = '.address-comments'
+/**
+ * High-level dev-line orchestrator. Owns the user-facing entry points
+ * (start/takeover/reset/publish/merge) and the per-tick driver. The per-phase
+ * advance functions live in ./phases.ts.
+ */
 
-/** Read the PR number/url the implementing agent wrote to .pr-url, if present. */
-function readPrUrlFile(worktreePath: string): { number: number; url: string } | null {
-  const f = join(worktreePath, PR_URL_FILE)
-  if (!existsSync(f)) return null
-  const content = readFileSync(f, 'utf8').trim()
-  if (!content) return null
-  // Both /pull/N (GitHub) and /pullrequest/N (Azure DevOps) are valid PR URLs.
-  const fromUrl = content.match(/\/(?:pullrequest|pull)\/(\d+)/i)
-  if (fromUrl) return { number: Number(fromUrl[1]), url: content.split(/\s+/)[0] }
-  const justNumber = content.match(/(\d{1,7})/)
-  if (justNumber) return { number: Number(justNumber[1]), url: content }
-  return null
+function note(category: 'dev', message: string, detail?: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
+  store.recordBrainNote({ tick: tickState.current, category, message, detail, level })
 }
 
 function slug(s: string): string {
@@ -40,10 +29,6 @@ function slug(s: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 40)
-}
-
-function note(category: 'dev', message: string, detail?: Record<string, unknown>, level: 'info' | 'warn' = 'info') {
-  store.recordBrainNote({ tick: tickState.current, category, message, detail, level })
 }
 
 /**
@@ -63,12 +48,6 @@ function pickDevRepo(task: TrackerTask): { repo: Repo | null; reason?: string } 
   if (repos.length === 0) return { repo: null, reason: 'no watched repo is cloned locally' }
   const watched = new Set(store.getSettings().watchRepos)
   return { repo: repos.find((r) => watched.has(r.name)) ?? repos[0] }
-}
-
-function isTaskSessionActive(task: TrackerTask): boolean {
-  if (!task.sessionId) return false
-  const s = store.getSession(task.sessionId)
-  return !!s && ['starting', 'running', 'stalled', 'needs_human'].includes(s.status) && sessionManager.isLive(s.id)
 }
 
 /**
@@ -241,6 +220,8 @@ export async function requestDevChanges(taskId: number, instructions: string): P
   const harness = store.getCodingHarness()
   if (!harness || !instructions.trim()) return
 
+  const { writeAdjacentWorkFile } = await import('../worktree/manager')
+  const { SIGNAL } = await import('../worktree/signals')
   if (worktree && repo) {
     await writeAdjacentWorkFile(worktree.path, repo.id)
   }
@@ -251,7 +232,7 @@ export async function requestDevChanges(taskId: number, instructions: string): P
     `Make these changes in this worktree on branch ${worktree.branch}, commit, and push to update ` +
     `the existing PR. Do NOT open a new PR. ` +
     `When you have committed and pushed everything, signal completion by creating an empty file ` +
-    `named ${REVISE_FILE} in this directory (e.g. \`touch ${REVISE_FILE}\`). ` +
+    `named ${SIGNAL.REVISE} in this directory (e.g. \`touch ${SIGNAL.REVISE}\`). ` +
     `That file tells the orchestrator the revision is done.\n\n` +
     `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
 
@@ -271,7 +252,9 @@ export async function requestDevChanges(taskId: number, instructions: string): P
   note('dev', `${task.issueKey}: revising draft per your request.`, { key: task.issueKey })
 }
 
-/** Publish a draft PR (auto or user-initiated) → in_review. */
+/** Publish a draft PR (user-initiated). The auto-publish path is in
+ *  phases.ts → advanceDraft; this entry point is wired to the UI's
+ *  Publish button. */
 export async function publishDevTask(taskId: number): Promise<void> {
   const task = store.getTask(taskId)
   if (!task || !task.prNumber || !task.repoId) return
@@ -300,23 +283,7 @@ export async function mergeDevTask(taskId: number): Promise<void> {
   const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
   await forge.mergePr(repo.name, task.prNumber, forgeConfig)
   store.recordEvent('dev.merged', { taskId, prNumber: task.prNumber, via: 'autopilotv' })
-  await finishMerged(task)
-}
-
-/** PR merged → stop tracking. Prune the worktree; do NOT touch the tracker (QA owns Done). */
-async function finishMerged(task: TrackerTask): Promise<void> {
-  if (task.sessionId && sessionManager.isLive(task.sessionId)) {
-    sessionManager.kill(task.sessionId, 'pr merged')
-  }
-  if (task.worktreeId) {
-    const wt = store.getWorktree(task.worktreeId)
-    if (wt && !wt.prunedAt) await pruneWorktree(wt)
-  }
-  // Completes the task and freezes its current tracker status; if the tracker
-  // later moves it back to To Do (a QA bounce), the brain re-queues it (see
-  // store.upsertTask reopen detection + brain.refreshWork).
-  store.completeTask(task.id)
-  note('dev', `PR #${task.prNumber} for ${task.issueKey} merged — done, no longer tracking.`, { key: task.issueKey })
+  await finishMergedPhase(task)
 }
 
 /**
@@ -338,7 +305,8 @@ export async function resetDevTask(taskId: number, eventKind = 'dev.reset'): Pro
 }
 
 /**
- * Advance every in-flight dev task through its lifecycle. Called each tick.
+ * Drive every in-flight dev task through its phase, dispatched via the
+ * per-phase table in ./phases.ts. Called each tick.
  */
 export async function advanceDevTasks(settings: Settings): Promise<void> {
   const tasks = store
@@ -347,181 +315,9 @@ export async function advanceDevTasks(settings: Settings): Promise<void> {
 
   for (const task of tasks) {
     try {
-      await advanceOne(task, settings)
+      await ADVANCE_FNS[task.phase](task, settings)
     } catch (err) {
       log.warn('dev advance failed', { taskId: task.id, err: String(err) })
     }
   }
-}
-
-async function advanceOne(task: TrackerTask, settings: Settings): Promise<void> {
-  const repo = task.repoId ? store.getRepo(task.repoId) : null
-  const worktree = task.worktreeId ? store.getWorktree(task.worktreeId) : null
-  if (!repo) return
-  const { forge, config: forgeConfig } = forgeForRepo(repo, settings)
-
-  if (task.phase === 'implementing') {
-    if (!worktree) return
-    // Primary signal: the .pr-url file the agent writes. Fallback: query the
-    // active forge for an open PR on the branch (in case the agent skipped
-    // the file).
-    const fromFile = readPrUrlFile(worktree.path)
-    const pr = fromFile ?? (await forge.findPrForBranch(repo.name, worktree.branch, forgeConfig))
-    if (pr) {
-      store.setTaskPr(task.id, pr.number, pr.url)
-      store.setTaskPhase(task.id, 'draft')
-      if (task.sessionId && sessionManager.isLive(task.sessionId)) {
-        sessionManager.kill(task.sessionId, 'draft PR opened')
-      }
-      note('dev', `${task.issueKey} opened draft PR #${pr.number}${fromFile ? ' (via .pr-url)' : ''}.`, {
-        key: task.issueKey
-      })
-      return
-    }
-    // No PR yet. If the implementing session died, it failed to produce one.
-    if (!isTaskSessionActive(task)) {
-      store.setTaskPhase(task.id, 'error')
-      note('dev', `${task.issueKey} implementation ended without opening a PR — needs a human.`, {}, 'warn')
-      notifier.notify({
-        kind: 'needs_human',
-        title: `Dev task needs you — ${task.issueKey}`,
-        body: 'Implementation finished without opening a PR.',
-        deepLink: { type: 'task', id: task.id }
-      })
-    }
-    return
-  }
-
-  if (task.phase === 'revising') {
-    // The agent writes .revise when done; that's the signal to end the (still
-    // interactive) session. Also complete if the session died on its own.
-    const reviseFile = worktree ? join(worktree.path, REVISE_FILE) : null
-    const signalled = reviseFile ? existsSync(reviseFile) : false
-    if (signalled || !isTaskSessionActive(task)) {
-      if (reviseFile && signalled) rmSync(reviseFile, { force: true }) // cleanup so the next revision works
-      if (task.sessionId && sessionManager.isLive(task.sessionId)) {
-        sessionManager.kill(task.sessionId, 'revision complete')
-      }
-      let next: TrackerTask['phase'] = 'draft'
-      if (worktree && task.prNumber) {
-        const pr = await forge.findPrForBranch(repo.name, worktree.branch, forgeConfig)
-        if (pr && pr.isDraft === false) next = 'in_review'
-      }
-      store.setTaskPhase(task.id, next)
-      note(
-        'dev',
-        `${task.issueKey}: revisions complete — back to ${next === 'in_review' ? 'review' : 'draft'}.`,
-        { key: task.issueKey }
-      )
-    }
-    return
-  }
-
-  if (task.phase === 'draft') {
-    if (settings.autoPublish) {
-      await publishDevTask(task.id)
-    }
-    // else: wait for the user to click Publish.
-    return
-  }
-
-  if (task.phase === 'in_review' || task.phase === 'ready_to_merge') {
-    if (!task.prNumber) return
-    const r = await forge.getPrReadiness(repo.name, task.prNumber, forgeConfig)
-
-    if (r.state === 'MERGED') {
-      await finishMerged(task)
-      return
-    }
-    if (r.state === 'CLOSED') {
-      store.completeTask(task.id)
-      note('dev', `PR #${task.prNumber} for ${task.issueKey} was closed — no longer tracking.`, {}, 'warn')
-      return
-    }
-
-    // The address-comments agent writes .address-comments when done — end that
-    // (still interactive) session and clean up so the next round can run.
-    const addrFile = worktree ? join(worktree.path, ADDRESS_FILE) : null
-    if (addrFile && existsSync(addrFile)) {
-      rmSync(addrFile, { force: true })
-      if (task.sessionId && sessionManager.isLive(task.sessionId)) {
-        sessionManager.kill(task.sessionId, 'comments addressed')
-      }
-      note('dev', `${task.issueKey}: finished addressing review comments on PR #${task.prNumber}.`, {
-        key: task.issueKey
-      })
-    }
-
-    const satisfied =
-      r.approvals >= settings.requiredApprovals &&
-      r.unresolvedThreads === 0 &&
-      !r.changesRequested &&
-      r.mergeable &&
-      r.statusOk
-
-    if (task.phase === 'in_review') {
-      if (satisfied) {
-        if (task.sessionId && sessionManager.isLive(task.sessionId)) {
-          sessionManager.kill(task.sessionId, 'ready to merge')
-        }
-        store.setTaskPhase(task.id, 'ready_to_merge')
-        store.recordEvent('dev.ready_to_merge', { taskId: task.id, prNumber: task.prNumber })
-        note(
-          'dev',
-          `${task.issueKey} PR #${task.prNumber} is green (${r.approvals}/${settings.requiredApprovals} approvals, 0 unresolved) — ready for your merge.`,
-          { key: task.issueKey }
-        )
-        notifier.notify({
-          kind: 'pr_ready_to_merge',
-          title: `PR ready to merge — ${task.issueKey}`,
-          body: `PR #${task.prNumber} satisfied all gates. Merge when ready.`,
-          deepLink: { type: 'task', id: task.id }
-        })
-      } else if ((r.changesRequested || r.unresolvedThreads > 0) && !isTaskSessionActive(task)) {
-        // Spawn a session to address feedback in the existing worktree.
-        await startAddressComments(task, repo, worktree)
-      }
-      return
-    }
-
-    // ready_to_merge: regressed? (new changes requested) → back to in_review.
-    if (!satisfied && (r.changesRequested || r.unresolvedThreads > 0)) {
-      store.setTaskPhase(task.id, 'in_review')
-      note('dev', `${task.issueKey} got new feedback — back to addressing comments.`, {}, 'warn')
-    }
-  }
-}
-
-async function startAddressComments(
-  task: TrackerTask,
-  repo: Repo,
-  worktree: { path: string; id: number } | null
-): Promise<void> {
-  if (!worktree) return
-  const harness = store.getCodingHarness()
-  if (!harness) return
-
-  await writeAdjacentWorkFile(worktree.path, repo.id)
-
-  const prompt =
-    `Reviewers left feedback on PR #${task.prNumber} (${repo.name}).\n` +
-    `Read the unresolved review comments (e.g. \`gh pr view ${task.prNumber} --comments\`), ` +
-    `address them in this worktree, commit, and push to the same branch. ` +
-    `Reply to or resolve threads where appropriate. ` +
-    `When you have committed and pushed all fixes, signal completion by creating an empty file ` +
-    `named ${ADDRESS_FILE} in this directory (e.g. \`touch ${ADDRESS_FILE}\`). ` +
-    `That file tells the orchestrator you are done so it can re-check the PR.\n\n` +
-    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
-  const sessionId = sessionManager.spawn({
-    kind: 'dev',
-    workRef: `dev:${task.id}`,
-    harness,
-    cwd: worktree.path,
-    env: process.env,
-    worktreeId: worktree.id,
-    title: `${task.issueKey} address comments`.slice(0, 80),
-    initialInput: prompt
-  })
-  store.attachSessionToWork('dev', task.id, sessionId)
-  note('dev', `${task.issueKey}: addressing review feedback on PR #${task.prNumber}.`, { key: task.issueKey })
 }

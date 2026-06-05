@@ -1,15 +1,8 @@
 import { useState } from 'react'
-import type { AppState, TrackerTask } from '@shared/types/domain'
+import type { AppState, PrReview, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
 import { DiffView } from './DiffView'
-
-const TYPE_COLOR: Record<string, string> = {
-  Story: 'var(--green)',
-  Bug: 'var(--red)',
-  Task: 'var(--blue)',
-  'Sub-task': 'var(--aqua)',
-  Improvement: 'var(--purple)'
-}
+import { TYPE_COLOR, taskStateLabel } from '../theme'
 
 export function WorkQueue({ state }: { state: AppState }) {
   const openReviews = state.prReviews.filter(
@@ -70,7 +63,7 @@ export function WorkQueue({ state }: { state: AppState }) {
   )
 }
 
-function ReviewRow({ p }: { p: any }) {
+function ReviewRow({ p }: { p: PrReview }) {
   const [showDiff, setShowDiff] = useState(false)
   return (
     <div className={`card work-item task-card ${p.state === 'error' ? 'errored' : ''}`}>
@@ -122,33 +115,11 @@ function ReviewRow({ p }: { p: any }) {
   )
 }
 
-const PHASE_META: Record<string, { label: string; color: string }> = {
-  implementing: { label: 'Implementing', color: 'var(--blue)' },
-  draft: { label: 'Draft', color: 'var(--yellow)' },
-  revising: { label: 'Revising', color: 'var(--orange)' },
-  in_review: { label: 'In Review', color: 'var(--purple)' },
-  ready_to_merge: { label: 'Ready to merge', color: 'var(--green)' },
-  error: { label: 'Error', color: 'var(--red)' }
-}
-
-// Tracker status labels, shown until AutopilotV is actively driving the task.
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  todo: { label: 'To Do', color: 'var(--comment)' },
-  in_progress: { label: 'In Progress', color: 'var(--blue)' },
-  in_review: { label: 'In Review', color: 'var(--purple)' },
-  ready_to_merge: { label: 'Ready to merge', color: 'var(--green)' },
-  done: { label: 'Done', color: 'var(--green)' }
-}
-
 function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolean }) {
   const typeColor = TYPE_COLOR[task.issueType] ?? 'var(--comment)'
   // Reflect the real tracker status while unclaimed; show AutopilotV's phase once it's driving.
   const driving = task.phase !== 'unclaimed'
-  const phaseMeta = PHASE_META[task.phase]
-  const label = driving ? (phaseMeta?.label ?? task.phase) : task.trackerStatus || 'To Do'
-  const color = driving
-    ? (phaseMeta?.color ?? 'var(--comment)')
-    : (STATUS_META[task.status]?.color ?? 'var(--comment)')
+  const { label, color } = taskStateLabel(driving, task.phase, task.trackerStatus, task.status)
   const claimable = task.phase === 'unclaimed' && task.status === 'todo'
   // Take over anything in flight (In Progress / In Review) that AutopilotV isn't already driving.
   const takeoverable = task.phase === 'unclaimed' && task.status !== 'todo' && task.status !== 'done'

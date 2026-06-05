@@ -197,6 +197,22 @@ const MIGRATIONS: Migration[] = [
     ALTER TABLE repos ADD COLUMN forge TEXT NOT NULL DEFAULT 'github';
     ALTER TABLE pr_reviews ADD COLUMN forge TEXT NOT NULL DEFAULT 'github';
     `
+  },
+  {
+    // Single source of truth: config_json is now the only place role-default
+    // flags live. The legacy is_review_default column was both a redundant
+    // denormalization (drifted in practice) and a path to bugs where the
+    // column and the json disagreed. Back-fill any pre-existing rows so their
+    // json reflects the prior column value, then drop the column.
+    version: 11,
+    up: `
+    -- For any harness where the column was true, make sure config_json agrees.
+    UPDATE harnesses
+       SET config_json = json_set(config_json, '$.isReviewDefault', json(CASE WHEN is_review_default = 1 THEN 'true' ELSE 'false' END))
+     WHERE is_review_default != json_extract(config_json, '$.isReviewDefault');
+    -- Drop the column.
+    ALTER TABLE harnesses DROP COLUMN is_review_default;
+    `
   }
 ]
 
