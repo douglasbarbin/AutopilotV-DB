@@ -48,11 +48,11 @@ export function WorkQueue({ state }: { state: AppState }) {
               <button
                 key={p.key}
                 className={`project-chip ${p.enabled ? 'on' : 'off'}`}
-                title={`${p.name} — ${p.openCount} open · click to ${p.enabled ? 'hide' : 'show'}`}
+                title={`${p.name} (${p.key}) — ${p.openCount} open · click to ${p.enabled ? 'hide' : 'show'}`}
                 onClick={() => void api.toggleTrackerProject(p.key, !p.enabled)}
               >
                 <span className="project-chip-dot" />
-                {p.key}
+                {p.name || p.key}
                 {p.openCount > 0 && <span className="project-chip-count">{p.openCount}</span>}
               </button>
             ))}

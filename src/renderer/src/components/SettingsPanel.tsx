@@ -177,7 +177,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
                     checked={p.enabled}
                     onChange={(e) => void api.toggleTrackerProject(p.key, e.target.checked)}
                   />
-                  <span className="proj-key">{p.key}</span>
+                  <span className="proj-key">{p.name || p.key}</span>
                 </label>
                 <span className="proj-count">{p.openCount} open</span>
                 <select
