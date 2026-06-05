@@ -73,50 +73,48 @@ export function WorkQueue({ state }: { state: AppState }) {
 function ReviewRow({ p }: { p: any }) {
   const [showDiff, setShowDiff] = useState(false)
   return (
-    <div className={`card work-item task-card ${p.state === 'error' ? 'errored' : ''}`} style={{ padding: '13px 15px', flexDirection: 'column', alignItems: 'stretch' }}>
-      <div className="task-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="work-main">
-          <div className="work-title-row">
-            <span className="chip pr">PR #{p.prNumber}</span>
-            <span className="work-title">{p.title}</span>
-          </div>
-          <span className="work-sub">
-            {p.repoName} · opened by {p.author} ·{' '}
-            <span className={`state-tag ${p.state === 'error' ? 'error' : ''}`}>
-              {p.state.replace(/_/g, ' ')}
-            </span>
+    <div className={`card work-item task-card ${p.state === 'error' ? 'errored' : ''}`}>
+      <div className="work-main">
+        <div className="work-title-row">
+          <span className="chip pr">PR #{p.prNumber}</span>
+          <span className="work-title">{p.title}</span>
+        </div>
+        <span className="work-sub">
+          {p.repoName} · opened by {p.author} ·{' '}
+          <span className={`state-tag ${p.state === 'error' ? 'error' : ''}`}>
+            {p.state.replace(/_/g, ' ')}
           </span>
-        </div>
-        <div className="work-actions">
-          {p.prNumber != null && p.repoId != null && (
-            <button className={`btn-ghost ${showDiff ? 'active' : ''}`} onClick={() => setShowDiff(!showDiff)}>
-              {showDiff ? 'Hide Diff' : 'Diff'}
+        </span>
+      </div>
+      <div className="work-actions">
+        {p.prNumber != null && p.repoId != null && (
+          <button className={`btn-ghost ${showDiff ? 'active' : ''}`} onClick={() => setShowDiff(!showDiff)}>
+            {showDiff ? 'Hide Diff' : 'Diff'}
+          </button>
+        )}
+        {p.state === 'discovered' && (
+          <>
+            <button className="btn-primary" onClick={() => void api.claim({ kind: 'review', id: p.id })}>
+              Review
             </button>
-          )}
-          {p.state === 'discovered' && (
-            <>
-              <button className="btn-primary" onClick={() => void api.claim({ kind: 'review', id: p.id })}>
-                Review
-              </button>
-              <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
-                Skip
-              </button>
-            </>
-          )}
-          {p.state === 'error' && (
-            <>
-              <button className="btn-primary" onClick={() => void api.resetReview(p.id)}>
-                Retry
-              </button>
-              <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
-                Dismiss
-              </button>
-            </>
-          )}
-        </div>
+            <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
+              Skip
+            </button>
+          </>
+        )}
+        {p.state === 'error' && (
+          <>
+            <button className="btn-primary" onClick={() => void api.resetReview(p.id)}>
+              Retry
+            </button>
+            <button className="btn-ghost" onClick={() => void api.skip({ kind: 'review', id: p.id })}>
+              Dismiss
+            </button>
+          </>
+        )}
       </div>
       {showDiff && (
-        <div className="collapsible-diff-drawer" style={{ borderTop: '1px solid var(--border)', paddingTop: '10px', marginTop: '5px' }}>
+        <div className="collapsible-diff-drawer">
           <DiffView prNumber={p.prNumber} repoId={p.repoId} />
         </div>
       )}
@@ -171,8 +169,7 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
     setTakingOver(false)
   }
   return (
-    <div className={`card work-item task-card ${task.phase === 'error' ? 'errored' : ''}`} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-      <div className="task-row">
+    <div className={`card work-item task-card ${task.phase === 'error' ? 'errored' : ''}`}>
       <div className="work-main">
         <div className="work-title-row">
           <span className="chip type" style={{ color: typeColor, borderColor: typeColor }}>
@@ -277,7 +274,6 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
           </button>
         )}
       </div>
-      </div>
       {takingOver && (
         <div className="request-form takeover-form">
           <label className="takeover-label">
@@ -324,7 +320,7 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
         </div>
       )}
       {showDiff && (
-        <div className="collapsible-diff-drawer" style={{ borderTop: '1px solid var(--border)', paddingTop: '10px', marginTop: '5px' }}>
+        <div className="collapsible-diff-drawer">
           <DiffView worktreeId={task.worktreeId || undefined} prNumber={task.prNumber || undefined} repoId={task.repoId || undefined} />
         </div>
       )}

@@ -720,6 +720,22 @@ button:disabled {
   display: flex;
   gap: 7px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+/* On stacked cards the actions sit on their own full-width row below the title
+   (a wrapping action bar) so a crowd of buttons never squeezes the title. */
+.task-card .work-actions {
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+.work-actions:empty {
+  display: none;
+}
+/* Inline diff drawer revealed under a card's action bar. */
+.collapsible-diff-drawer {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
 }
 .chip {
   font-size: 10.5px;
@@ -1675,11 +1691,12 @@ button:disabled {
   height: 100%;
   pointer-events: none;
   z-index: -1;
-  opacity: 0.15;
-  transition: opacity 1s ease-in-out;
+  opacity: 0.18;
+  /* a long, gentle ramp so engaging sessions doesn't lurch the backdrop */
+  transition: opacity 2.8s ease-in-out;
 }
 .starfield-overlay.active {
-  opacity: 0.65;
+  opacity: 0.42;
 }
 
 /* Translucent themes for cards & session pane (glass cockpit) */
