@@ -1710,3 +1710,100 @@ button:disabled {
 :root[data-theme='tomorrow'] .card {
   background: rgba(251, 251, 251, 0.55) !important;
 }
+
+/* =========================================================================
+   ===== polish: glow & life (motion-free) ================================
+   Additive, theme-aware (color-mix off the palette vars). No transforms or
+   sliding — just light. The two looping glows pause under reduced-motion.
+   ========================================================================= */
+
+/* ----- buttons: an energetic accent glow on hover (fades via base transition) */
+.btn-primary:hover {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.approve:hover {
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--green) 40%, transparent);
+}
+
+/* ----- nav: the active item's accent bar gets a soft glow ----------------- */
+.nav-item.active {
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    -1px 0 12px -4px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* ----- the alert badge throbs a halo for attention (no movement) ---------- */
+.nav-badge.alert {
+  animation: alertthrob 1.5s ease-in-out infinite;
+}
+@keyframes alertthrob {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 55%, transparent);
+  }
+  60% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+/* ----- the signature touch: the running Brain visibly breathes ------------ */
+.brain-toggle.on {
+  animation: breathe 2.6s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 color-mix(in srgb, var(--green) 0%, transparent),
+      inset 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 16px -2px color-mix(in srgb, var(--green) 38%, transparent),
+      inset 0 0 10px color-mix(in srgb, var(--green) 16%, transparent);
+  }
+}
+
+/* ----- status dots: the healthy ones gently pulse so "live" reads as live - */
+.tick-status .pulse {
+  box-shadow: 0 0 8px var(--aqua);
+}
+
+/* ----- inputs & focus: a clean accent ring instead of the default outline - */
+.request-form textarea:focus,
+.request-form .pr-input:focus,
+.onboard-step input:focus,
+.onboard-step select:focus,
+.onboard-step textarea:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ----- scrollbar reacts to the cursor ------------------------------------- */
+::-webkit-scrollbar-thumb:hover {
+  background: var(--comment);
+}
+
+/* ----- toast: a soft colored halo matching its kind ----------------------- */
+.toast {
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.toast.needs_human {
+  box-shadow:
+    var(--shadow),
+    0 0 22px -6px color-mix(in srgb, var(--red) 55%, transparent);
+}
+.toast.pr_ready_to_merge {
+  box-shadow:
+    var(--shadow),
+    0 0 22px -6px color-mix(in srgb, var(--green) 55%, transparent);
+}
+
+/* ----- respect the user: pause the looping glows when motion is unwelcome - */
+@media (prefers-reduced-motion: reduce) {
+  .nav-badge.alert,
+  .brain-toggle.on {
+    animation: none;
+  }
+}
