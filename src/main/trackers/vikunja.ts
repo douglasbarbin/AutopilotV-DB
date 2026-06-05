@@ -10,9 +10,12 @@ import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
  * Verified against Vikunja v2.3.0. Non-obvious things to know:
  *   - GET /api/v1/tasks/all returns 400 ("Invalid model") on this version.
  *     The correct "all tasks I can see" endpoint is GET /api/v1/tasks.
- *   - Tasks are commonly unassigned (assignees is null). Ownership is carried
- *     in `created_by.username`; we treat that as the assignee for display and
- *     use it as a fallback for the assignee filter.
+ *   - Tasks are commonly unassigned (assignees is null). An unassigned task is
+ *     only "mine" if I created it. A task I created but explicitly assigned to
+ *     someone else is NOT mine — we must look at the assignee list, not the
+ *     creator, to decide whose queue a task belongs in. (Earlier versions
+ *     conflated the two and would happily start implementing work that
+ *     belonged to a teammate.)
  *   - Task updates are POST /api/v1/tasks/{id} (PUT returns 405 — the route
  *     only allows OPTIONS/DELETE/GET/POST).
  *   - Moving a task to a Kanban column is a SEPARATE call from setting
@@ -26,6 +29,14 @@ import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
  *   token          — Personal API token (Vikunja → Settings → API Tokens)
  *   projectId      — (optional) Restrict to a single project ID
  *   assigneeFilter — (optional) Filter by this username; defaults to the current user
+ *
+ * Assignee resolution: a task is included in "assigned to me" only when EITHER
+ *   (a) the task has an assignees[] list and the current user is in it, OR
+ *   (b) the task has no assignees (assignees is null/missing/empty) and the
+ *       current user is the creator (an unassigned task I filed).
+ * If the current user cannot be resolved (neither assigneeFilter nor /user
+ * yields a username), listAssigned throws — better to surface the misconfig
+ * than to silently enqueue every task the token can see.
  */
 
 const MAX_PER_PAGE = 50
@@ -122,6 +133,25 @@ function primaryAssignee(task: any): string {
   return taskCreatorUsername(task)
 }
 
+/**
+ * True iff `task` is genuinely "assigned to me" under Vikunja's data model.
+ *
+ * A task is mine when EITHER:
+ *   - the task has an assignees[] list and my username is in it, OR
+ *   - the task is unassigned (no assignees at all) and I am the creator —
+ *     i.e. an unfiled ticket I created that nobody has picked up.
+ *
+ * A task I created but explicitly assigned to a teammate is NOT mine, even
+ * though the old code would surface it. The assignee list is the source of
+ * truth, not the creator field.
+ */
+function isAssignedToUser(task: any, username: string): boolean {
+  if (!username) return false
+  const as = taskAssignees(task)
+  if (as.length > 0) return as.some((a) => a.username === username)
+  return taskCreatorUsername(task) === username
+}
+
 function mapTask(task: any, projectNameById: Map<number, string>): TrackerIssue {
   let status: string
   if (task.done) {
@@ -182,6 +212,20 @@ async function fetchCurrentUsername(base: string, token: string): Promise<string
   return me?.username ?? ''
 }
 
+/**
+ * Resolve the username to filter the assigned-tasks queue by. Order of
+ * preference: explicit `assigneeFilter` config, then the authenticated user
+ * looked up via /api/v1/user. Throws if neither yields a username — surfacing
+ * a misconfig beats silently returning every task the token can see.
+ */
+async function resolveMyUsername(base: string, token: string, assigneeFilter: string): Promise<string> {
+  const explicit = (assigneeFilter ?? '').trim()
+  if (explicit) return explicit
+  const me = await fetchCurrentUsername(base, token)
+  if (!me) throw new Error('could not resolve the authenticated Vikunja user (no username on /user)')
+  return me
+}
+
 /** A kanban bucket title we treat as "in flight" — In Progress / Doing / WIP. */
 const IN_FLIGHT_BUCKET = /\b(in[\s_-]?progress|doing|wip|work\s*in\s*progress|working)\b/i
 
@@ -195,16 +239,10 @@ export const vikunjaTracker: ProjectTracker = {
     const token = config.token
     const projectId = config.projectId ?? ''
     const projectNameById = await fetchProjectNameMap(base, token)
-    let username = config.assigneeFilter
-    if (!username) {
-      try {
-        username = await fetchCurrentUsername(base, token)
-      } catch {
-        // /user lookup is best-effort here — a 401 shouldn't take down the
-        // whole task list. Fall through with an empty filter (no assignee
-        // matching) so we still see all accessible tasks.
-      }
-    }
+    // Throws if the username can't be resolved — see resolveMyUsername. That's
+    // the correct failure mode: it surfaces a misconfigured token/upstream to
+    // the brain, rather than silently enqueueing tasks assigned to other users.
+    const username = await resolveMyUsername(base, token, config.assigneeFilter ?? '')
 
     const tasks = projectId
       ? await fetchAllPages('GET', (p) =>
@@ -216,11 +254,7 @@ export const vikunjaTracker: ProjectTracker = {
 
     return tasks
       .filter((t: any) => !t.done)
-      .filter((t: any) => {
-        if (!username) return true
-        if (taskCreatorUsername(t) === username) return true
-        return taskAssignees(t).some((a) => a.username === username)
-      })
+      .filter((t: any) => isAssignedToUser(t, username))
       .map((t: any) => mapTask(t, projectNameById))
   },
 

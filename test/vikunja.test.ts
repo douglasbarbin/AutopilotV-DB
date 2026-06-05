@@ -143,6 +143,36 @@ describe('vikunjaTracker.listAssigned', () => {
     expect(issues).toHaveLength(1)
   })
 
+  it('drops a task the user created but explicitly assigned to someone else (assignee, not creator, is the source of truth)', async () => {
+    // Regression: a task I filed and then handed off to a teammate must NOT
+    // show up in my queue. Earlier versions conflated creator and assignee
+    // and would happily start implementing work that belonged to someone else.
+    queueProjects()
+    fetchMock.mockResolvedValueOnce(
+      jsonResp(
+        [{ ...SAMPLE_TASK, assignees: [{ username: 'someone-else' }] }],
+        { totalPages: 1 }
+      )
+    )
+    const issues = await vikunjaTracker.listAssigned(CONFIG)
+    expect(issues).toHaveLength(0)
+  })
+
+  it('drops a task assigned to someone else even when also in an empty assignees[] is false', async () => {
+    // Two-assignee task that doesn't include me, regardless of who created it.
+    queueProjects()
+    fetchMock.mockResolvedValueOnce(
+      jsonResp(
+        [
+          { ...SAMPLE_TASK, id: 10, assignees: [{ username: 'teammate-a' }, { username: 'teammate-b' }] }
+        ],
+        { totalPages: 1 }
+      )
+    )
+    const issues = await vikunjaTracker.listAssigned(CONFIG)
+    expect(issues).toHaveLength(0)
+  })
+
   it('drops a task that has neither matching assignees nor matching creator', async () => {
     queueProjects()
     fetchMock.mockResolvedValueOnce(
@@ -153,6 +183,24 @@ describe('vikunjaTracker.listAssigned', () => {
     )
     const issues = await vikunjaTracker.listAssigned(CONFIG)
     expect(issues).toHaveLength(0)
+  })
+
+  it('keeps only the assigned-to-me tasks out of a mixed list', async () => {
+    queueProjects()
+    fetchMock.mockResolvedValueOnce(
+      jsonResp(
+        [
+          { ...SAMPLE_TASK, id: 1, assignees: [{ username: 'justinwoodring' }] }, // mine
+          { ...SAMPLE_TASK, id: 2, assignees: [{ username: 'teammate' }] },          // not mine
+          { ...SAMPLE_TASK, id: 3, assignees: null },                                  // unassigned
+          { ...SAMPLE_TASK, id: 4, created_by: { id: 9, username: 'someone-else' }, assignees: null }, // unassigned, not creator
+          { ...SAMPLE_TASK, id: 5, assignees: [{ username: 'teammate' }, { username: 'justinwoodring' }] } // mine + others
+        ],
+        { totalPages: 1 }
+      )
+    )
+    const issues = await vikunjaTracker.listAssigned(CONFIG)
+    expect(issues.map((i) => i.key)).toEqual(['1', '3', '5'])
   })
 
   it('filters out done tasks', async () => {
@@ -172,6 +220,34 @@ describe('vikunjaTracker.listAssigned', () => {
     expect(issues).toHaveLength(1)
     expect(fetchMock.mock.calls[0][0]).toBe('https://vikunja.example.com/api/v1/projects?per_page=50')
     expect(fetchMock.mock.calls[1][0]).toBe('https://vikunja.example.com/api/v1/user')
+  })
+
+  it('throws (and surfaces the misconfig) when neither assigneeFilter nor /user yields a username', async () => {
+    // Regression: the old code fell through to "if (!username) return true" and
+    // leaked every task the token could see into the assigned-tasks queue.
+    // Returning a misconfiguration is much better than silently starting work
+    // that belongs to someone else.
+    queueProjects()
+    fetchMock.mockResolvedValueOnce(jsonResp({ id: 1 /* no username field */ }))
+    await expect(vikunjaTracker.listAssigned({ ...CONFIG, assigneeFilter: '' })).rejects.toThrow(
+      /could not resolve the authenticated Vikunja user/
+    )
+  })
+
+  it('throws (and surfaces the misconfig) when /user errors with no assigneeFilter set', async () => {
+    queueProjects()
+    fetchMock.mockResolvedValueOnce(jsonResp(null, { ok: false, status: 401 }))
+    await expect(vikunjaTracker.listAssigned({ ...CONFIG, assigneeFilter: '' })).rejects.toThrow(/HTTP 401/)
+  })
+
+  it('does NOT fall through to /user when assigneeFilter is set', async () => {
+    queueProjects()
+    fetchMock.mockResolvedValueOnce(jsonResp([SAMPLE_TASK], { totalPages: 1 }))
+    const issues = await vikunjaTracker.listAssigned(CONFIG)
+    expect(issues).toHaveLength(1)
+    // /user must not be called when the explicit filter is set.
+    const urls = fetchMock.mock.calls.map((c) => c[0])
+    expect(urls).not.toContain('https://vikunja.example.com/api/v1/user')
   })
 
   it('returns no issues (and does not call fetch) when endpoint or token is missing', async () => {
