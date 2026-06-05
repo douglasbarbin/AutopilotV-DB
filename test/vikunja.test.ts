@@ -295,15 +295,22 @@ describe('vikunjaTracker.checkAuth', () => {
 
 describe('vikunjaTracker.transition', () => {
   /**
-   * Queue the standard 4-step flow for a successful bucket move + percent_done update:
-   *   1. GET  /api/v1/tasks/{key}         → resolve project_id
+   * Queue the standard 5-step flow for a successful bucket move + percent_done update:
+   *   1. GET  /api/v1/tasks/{key}         → resolve project_id + capture current assignees
    *   2. GET  /api/v1/projects/{pid}/views → find kanban view
    *   3. GET  .../views/{vid}/buckets     → find the "In Progress" bucket
    *   4. POST .../buckets/{bid}/tasks      → add the task to that bucket
-   *   5. POST /api/v1/tasks/{key}         → set percent_done
+   *   5. POST /api/v1/tasks/bulk          → set percent_done without clobbering the rest
+   *
+   * Step 5 goes through the bulk endpoint with an explicit `fields` whitelist
+   * and re-sends any current assignees. The single-task POST /tasks/{id}
+   * endpoint treats omitted fields as "clear them", which silently wiped
+   * the task's assignees, description, priority, etc. after every move.
    */
-  function queueHappyBucketMove(taskProjectId = 2) {
-    fetchMock.mockResolvedValueOnce(jsonResp({ ...SAMPLE_TASK, id: 42, project_id: taskProjectId }))
+  function queueHappyBucketMove(taskProjectId = 2, taskOverrides: Record<string, unknown> = {}) {
+    fetchMock.mockResolvedValueOnce(
+      jsonResp({ ...SAMPLE_TASK, id: 42, project_id: taskProjectId, ...taskOverrides })
+    )
     fetchMock.mockResolvedValueOnce(
       jsonResp([{ id: 8, view_kind: 'kanban' }, { id: 5, view_kind: 'list' }])
     )
@@ -340,18 +347,88 @@ describe('vikunjaTracker.transition', () => {
     expect(bucketInit.method).toBe('POST')
     expect(JSON.parse(bucketInit.body)).toEqual({ task_id: 42 })
 
-    // Step 5: POST percent_done
-    const [taskUrl, taskInit] = fetchMock.mock.calls[4]
-    expect(taskUrl).toBe('https://vikunja.example.com/api/v1/tasks/42')
-    expect(taskInit.method).toBe('POST')
-    expect(JSON.parse(taskInit.body)).toEqual({ done: false, percent_done: 0.5 })
+    // Step 5: bulk-update percent_done (fields whitelist, no assignees on this task)
+    const [bulkUrl, bulkInit] = fetchMock.mock.calls[4]
+    expect(bulkUrl).toBe('https://vikunja.example.com/api/v1/tasks/bulk')
+    expect(bulkInit.method).toBe('POST')
+    expect(JSON.parse(bulkInit.body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: { done: false, percent_done: 0.5 }
+    })
   })
 
   it('uses percent_done=0.75 for "In Review" (same bucket, different progress)', async () => {
     queueHappyBucketMove()
     await vikunjaTracker.transition('42', 'In Review', CONFIG)
     const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
-    expect(JSON.parse(last[1].body)).toEqual({ done: false, percent_done: 0.75 })
+    expect(JSON.parse(last[1].body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: { done: false, percent_done: 0.75 }
+    })
+  })
+
+  it('echoes the current assignees in the bulk-update payload so they are not deleted', async () => {
+    // Regression: the previous single-task POST /tasks/{id} call sent only
+    // { done, percent_done }. Vikunja's task-update path reconciles
+    // assignees unconditionally and treats an absent list as "delete all",
+    // so the first transition wiped the entire assignee roster. The bulk
+    // endpoint with `fields: ['done', 'percent_done']` is the workaround,
+    // but only if we still re-send the assignees — the reconciliation runs
+    // before the field whitelist is applied.
+    queueHappyBucketMove(2, {
+      assignees: [
+        { id: 7, username: 'teammate-a' },
+        { id: 9, username: 'teammate-b' }
+      ]
+    })
+    await vikunjaTracker.transition('42', 'In Progress', CONFIG)
+    const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
+    expect(JSON.parse(last[1].body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: {
+        done: false,
+        percent_done: 0.5,
+        assignees: [
+          { id: 7, username: 'teammate-a' },
+          { id: 9, username: 'teammate-b' }
+        ]
+      }
+    })
+  })
+
+  it('omits the assignees field from the bulk-update payload when the task has none', async () => {
+    // When the task has no assignees to preserve we should NOT add an
+    // empty list to the payload — Vikunja's reconciliation would still
+    // run, and we want to avoid pointlessly mutating a non-existent
+    // assignee set.
+    queueHappyBucketMove(2, { assignees: null })
+    await vikunjaTracker.transition('42', 'In Progress', CONFIG)
+    const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]
+    expect(JSON.parse(last[1].body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: { done: false, percent_done: 0.5 }
+    })
+  })
+
+  it('routes the percent_done update through /tasks/bulk, never the single-task POST', async () => {
+    // Belt-and-braces: the single-task endpoint is the one that clobbers
+    // state. Make sure we never accidentally route through it again.
+    // The first GET to the single-task URL is fine; we just don't want
+    // a POST to it.
+    queueHappyBucketMove()
+    await vikunjaTracker.transition('42', 'In Progress', CONFIG)
+    const postsToSingle = fetchMock.mock.calls.filter(
+      ([u, init]) => init?.method === 'POST' && u === 'https://vikunja.example.com/api/v1/tasks/42'
+    )
+    expect(postsToSingle).toHaveLength(0)
+    const postsToBulk = fetchMock.mock.calls.filter(
+      ([u, init]) => init?.method === 'POST' && u === 'https://vikunja.example.com/api/v1/tasks/bulk'
+    )
+    expect(postsToBulk).toHaveLength(1)
   })
 
   it('matches "Doing" and "WIP" bucket titles too', async () => {
@@ -374,10 +451,14 @@ describe('vikunjaTracker.transition', () => {
     fetchMock.mockResolvedValueOnce(jsonResp({ id: 42, percent_done: 0.5 }))
 
     await vikunjaTracker.transition('42', 'In Progress', CONFIG)
-    expect(fetchMock).toHaveBeenCalledTimes(3) // task, views, percent — no bucket call
+    expect(fetchMock).toHaveBeenCalledTimes(3) // task, views, bulk
     const [url, init] = fetchMock.mock.calls[2]
-    expect(url).toBe('https://vikunja.example.com/api/v1/tasks/42')
-    expect(JSON.parse(init.body)).toEqual({ done: false, percent_done: 0.5 })
+    expect(url).toBe('https://vikunja.example.com/api/v1/tasks/bulk')
+    expect(JSON.parse(init.body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: { done: false, percent_done: 0.5 }
+    })
   })
 
   it('falls back to percent_done only when no In Progress bucket exists', async () => {
@@ -389,9 +470,9 @@ describe('vikunjaTracker.transition', () => {
     fetchMock.mockResolvedValueOnce(jsonResp({ id: 42, percent_done: 0.5 }))
 
     await vikunjaTracker.transition('42', 'In Progress', CONFIG)
-    expect(fetchMock).toHaveBeenCalledTimes(4) // task, views, buckets, percent — no bucket-add call
+    expect(fetchMock).toHaveBeenCalledTimes(4) // task, views, buckets, bulk — no bucket-add call
     const last = fetchMock.mock.calls[3]
-    expect(last[0]).toBe('https://vikunja.example.com/api/v1/tasks/42')
+    expect(last[0]).toBe('https://vikunja.example.com/api/v1/tasks/bulk')
   })
 
   it('still sets percent_done when the bucket-move call itself errors', async () => {
@@ -401,13 +482,17 @@ describe('vikunjaTracker.transition', () => {
       jsonResp([{ id: 4, title: 'To-Do' }, { id: 5, title: 'In Progress' }, { id: 6, title: 'Done' }])
     )
     fetchMock.mockResolvedValueOnce(jsonResp(null, { ok: false, status: 500 })) // bucket-add fails
-    fetchMock.mockResolvedValueOnce(jsonResp({ id: 42, percent_done: 0.5 })) // percent still happens
+    fetchMock.mockResolvedValueOnce(jsonResp({ id: 42, percent_done: 0.5 })) // bulk-update still happens
 
     await expect(vikunjaTracker.transition('42', 'In Progress', CONFIG)).resolves.toBeUndefined()
     expect(fetchMock).toHaveBeenCalledTimes(5)
     const last = fetchMock.mock.calls[4]
-    expect(last[0]).toBe('https://vikunja.example.com/api/v1/tasks/42')
-    expect(JSON.parse(last[1].body)).toEqual({ done: false, percent_done: 0.5 })
+    expect(last[0]).toBe('https://vikunja.example.com/api/v1/tasks/bulk')
+    expect(JSON.parse(last[1].body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: { done: false, percent_done: 0.5 }
+    })
   })
 
   it('still sets percent_done when the initial task lookup errors', async () => {
@@ -417,8 +502,12 @@ describe('vikunjaTracker.transition', () => {
     await vikunjaTracker.transition('42', 'In Progress', CONFIG)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const last = fetchMock.mock.calls[1]
-    expect(last[0]).toBe('https://vikunja.example.com/api/v1/tasks/42')
-    expect(JSON.parse(last[1].body)).toEqual({ done: false, percent_done: 0.5 })
+    expect(last[0]).toBe('https://vikunja.example.com/api/v1/tasks/bulk')
+    expect(JSON.parse(last[1].body)).toEqual({
+      task_ids: [42],
+      fields: ['done', 'percent_done'],
+      values: { done: false, percent_done: 0.5 }
+    })
   })
 
   it('is a no-op (no fetch) when endpoint or token is missing', async () => {
