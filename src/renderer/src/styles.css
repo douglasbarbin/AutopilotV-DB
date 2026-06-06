@@ -144,7 +144,7 @@ code {
 /* ===== app shell ===== */
 .app {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: 232px 1fr 56px;
   height: 100vh;
   overflow: hidden;
 }
@@ -1823,4 +1823,184 @@ button:disabled {
   .brain-toggle.on {
     animation: none;
   }
+}
+
+/* ===== right rail (quick actions) ===== */
+.right-rail {
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 0;
+  gap: 6px;
+  height: 100vh;
+  overflow-y: auto;
+}
+.rail-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--comment);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.rail-btn:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-color: var(--fg);
+}
+.rail-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--fg-strong);
+}
+.rail-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ===== terminal repo picker modal ===== */
+.picker-card {
+  width: 460px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 64px);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.picker-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--fg-strong);
+  font-weight: 600;
+  font-size: 14px;
+}
+.picker-close {
+  background: transparent;
+  border: none;
+  color: var(--comment);
+  font-size: 22px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.picker-close:hover {
+  background: var(--bg-card-hover);
+  color: var(--fg-strong);
+}
+.picker-search-wrap {
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.picker-search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg-strong);
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.picker-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.picker-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  min-height: 60px;
+  max-height: 50vh;
+}
+.picker-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 11px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  transition: background 0.1s;
+}
+.picker-row:hover:not(:disabled),
+.picker-row.active {
+  background: var(--bg-elev);
+}
+.picker-row.active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.picker-row:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.picker-row-name {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  color: var(--fg-strong);
+}
+.picker-row-path {
+  font-size: 11px;
+  color: var(--comment);
+  word-break: break-all;
+}
+.picker-empty {
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--comment);
+  font-size: 13px;
+}
+.picker-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.picker-hint {
+  color: var(--comment);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.picker-hint kbd {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--fg);
 }

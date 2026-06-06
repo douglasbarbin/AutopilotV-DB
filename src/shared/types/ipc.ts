@@ -35,6 +35,7 @@ export const Channels = {
   devMerge: 'dev.merge',
   devReset: 'dev.reset',
   terminalOpen: 'terminal.open',
+  terminalOpenAtPath: 'terminal.openAtPath',
   brainSetRunning: 'brain.setRunning',
   brainTickNow: 'brain.tickNow',
   dbWipe: 'db.wipe',
@@ -130,6 +131,7 @@ export interface AutopilotVApi {
   mergeDev(taskId: number): Promise<void>
   resetDev(taskId: number): Promise<void>
   openTerminal(taskId: number): Promise<void>
+  openTerminalAtPath(path: string): Promise<void>
   spawnSession(ref: WorkRef): Promise<number>
   killSession(sessionId: number): Promise<void>
   sendInput(sessionId: number, data: string): Promise<void>

@@ -12,6 +12,8 @@ import { Onboarding } from './components/Onboarding'
 import { About } from './components/About'
 import { Icon } from './components/Icon'
 import { Starfield } from './components/Starfield'
+import { RightRail, type RailAction } from './components/RightRail'
+import { TerminalRepoPicker } from './components/TerminalRepoPicker'
 import { INTEGRATION_STATUS_COLOR } from './theme'
 import logoUrl from '../../../build/icon.png'
 import { api } from './api'
@@ -33,6 +35,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>('work')
   const [toast, setToast] = useState<NotificationPayload | null>(null)
   const [showAbout, setShowAbout] = useState(false)
+  const [terminalPickerOpen, setTerminalPickerOpen] = useState(false)
   useEffect(() => api.onOpenAbout(() => setShowAbout(true)), [])
   useEffect(() => api.onTrayOpenSettings(() => setTab('settings')), [])
 
@@ -79,6 +82,15 @@ export function App() {
     events: 'Activity',
     settings: 'Settings'
   }
+
+  const railActions: RailAction[] = [
+    {
+      id: 'terminal',
+      label: 'Open terminal in repo…',
+      icon: 'terminal',
+      onClick: () => setTerminalPickerOpen(true)
+    }
+  ]
 
   return (
     <div className="app" style={{ position: 'relative', overflow: 'hidden' }}>
@@ -173,6 +185,8 @@ export function App() {
         </main>
       </div>
 
+      <RightRail actions={railActions} />
+
       {toast && (
         <div className={`toast ${toast.kind}`} onClick={() => setToast(null)}>
           <strong>{toast.title}</strong>
@@ -181,6 +195,9 @@ export function App() {
       )}
       {!state.settings.onboarded && <Onboarding state={state} />}
       {showAbout && <About version={state.appVersion} onClose={() => setShowAbout(false)} />}
+      {terminalPickerOpen && (
+        <TerminalRepoPicker state={state} onClose={() => setTerminalPickerOpen(false)} />
+      )}
     </div>
   )
 }

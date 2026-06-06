@@ -83,6 +83,11 @@ export function registerIpc(): void {
     store.recordEvent('terminal.opened', { taskId, path: wt.path })
   })
 
+  handle(Channels.terminalOpenAtPath, async (path: string) => {
+    openTerminal(path)
+    store.recordEvent('terminal.opened', { path, source: 'rail' })
+  })
+
   handle(Channels.devReset, async (taskId: number) => {
     await resetDevTask(taskId)
     pushState()

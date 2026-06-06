@@ -22,6 +22,8 @@ const api: AutopilotVApi = {
   mergeDev: (taskId: number) => ipcRenderer.invoke(Channels.devMerge, taskId) as Promise<void>,
   resetDev: (taskId: number) => ipcRenderer.invoke(Channels.devReset, taskId) as Promise<void>,
   openTerminal: (taskId: number) => ipcRenderer.invoke(Channels.terminalOpen, taskId) as Promise<void>,
+  openTerminalAtPath: (path: string) =>
+    ipcRenderer.invoke(Channels.terminalOpenAtPath, path) as Promise<void>,
   spawnSession: (ref: WorkRef) => ipcRenderer.invoke(Channels.sessionSpawn, ref) as Promise<number>,
   killSession: (sessionId: number) =>
     ipcRenderer.invoke(Channels.sessionKill, sessionId) as Promise<void>,
