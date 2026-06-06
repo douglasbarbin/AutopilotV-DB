@@ -22,23 +22,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       # Skip the postinstall Electron-rebuild — vitest runs under system Node,
       # which can't load binaries built for Electron's ABI. Install without
-      # lifecycle scripts, then build each native module for system Node via
-      # node-gyp directly. `npm rebuild` doesn't work here: it re-runs the
-      # `electron` package's install.js (which sets up Electron's V8 headers)
-      # and node-gyp then targets Electron's ABI. Direct node-gyp calls
-      # bypass that lifecycle and use the current Node's headers. The build
-      # job keeps the normal `npm ci` since it actually packages the Electron
-      # app and needs the Electron-ABI binary.
+      # lifecycle scripts and rebuild native modules for system Node. See
+      # scripts/rebuild-native-for-node.sh for the full rationale.
       - run: npm ci --ignore-scripts
       - name: Build native modules for system Node
-        run: |
-          for pkg in better-sqlite3 node-pty; do
-            if [ -d "node_modules/$pkg" ]; then
-              echo "→ $pkg"
-              rm -rf "node_modules/$pkg/build"
-              npx node-gyp rebuild --directory="node_modules/$pkg"
-            fi
-          done
+        run: ./scripts/rebuild-native-for-node.sh
       - run: npm run typecheck
       - run: npm test
 

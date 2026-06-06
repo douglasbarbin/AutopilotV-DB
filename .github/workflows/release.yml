@@ -34,9 +34,16 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
 
-
-      - name: Install deps
-        run: npm ci
+      # Same as the test job: install without lifecycle scripts, then build
+      # native modules for system Node so `npm test` (which runs under
+      # system Node) can load them. After the tests, the postinstall is
+      # re-run to install the Electron binary and rebuild native modules for
+      # Electron's ABI, which the `npm run build` and electron-builder steps
+      # need. See scripts/rebuild-native-for-node.sh for full rationale.
+      - name: Install deps (no lifecycle scripts)
+        run: npm ci --ignore-scripts
+      - name: Build native modules for system Node
+        run: ./scripts/rebuild-native-for-node.sh
 
       # electron-builder names the GitHub Release after package.json's version,
       # which is pinned at 1.0.0. Stamp it from the pushed tag (v1.2.0 -> 1.2.0)
@@ -49,6 +56,11 @@ jobs:
 
       - run: npm run typecheck
       - run: npm test
+
+      # Switch from Node-ABI to Electron-ABI for the app build + packaging.
+      - name: Install Electron and rebuild native modules for Electron
+        run: npm run postinstall
+
       - run: npm run build
 
       - name: Package & publish to the release
