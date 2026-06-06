@@ -20,7 +20,12 @@ jobs:
           python-version: '3.11'
       - name: Install Linux native build deps
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
-      - run: npm ci
+      # Skip the postinstall Electron-rebuild — vitest runs under system Node,
+      # which can't load a binary built for Electron's ABI. Rebuild for Node
+      # instead. The build job does the Electron-rebuild via the normal
+      # `npm ci` since it actually packages the Electron app.
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3
       - run: npm run typecheck
       - run: npm test
 
