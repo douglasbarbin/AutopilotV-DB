@@ -22,11 +22,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
       # Skip the postinstall Electron-rebuild — vitest runs under system Node,
       # which can't load binaries built for Electron's ABI. Install without
-      # lifecycle scripts and rebuild native modules for system Node. See
-      # scripts/rebuild-native-for-node.sh for the full rationale.
+      # lifecycle scripts, rebuild native modules for system Node, and then
+      # download the Electron binary on its own (some tests import `electron`
+      # and fail if the binary is missing). See scripts/rebuild-native-for-node.sh
+      # for the full rationale.
       - run: npm ci --ignore-scripts
       - name: Build native modules for system Node
         run: ./scripts/rebuild-native-for-node.sh
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
       - run: npm run typecheck
       - run: npm test
 

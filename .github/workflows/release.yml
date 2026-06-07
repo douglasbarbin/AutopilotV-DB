@@ -36,14 +36,17 @@ jobs:
 
       # Same as the test job: install without lifecycle scripts, then build
       # native modules for system Node so `npm test` (which runs under
-      # system Node) can load them. After the tests, the postinstall is
-      # re-run to install the Electron binary and rebuild native modules for
-      # Electron's ABI, which the `npm run build` and electron-builder steps
+      # system Node) can load them. The Electron binary is downloaded on
+      # its own before tests because some tests import `electron` and fail
+      # if the binary is missing. After tests, the postinstall rebuilds
+      # native modules for Electron's ABI, which the build/package steps
       # need. See scripts/rebuild-native-for-node.sh for full rationale.
       - name: Install deps (no lifecycle scripts)
         run: npm ci --ignore-scripts
       - name: Build native modules for system Node
         run: ./scripts/rebuild-native-for-node.sh
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
 
       # electron-builder names the GitHub Release after package.json's version,
       # which is pinned at 1.0.0. Stamp it from the pushed tag (v1.2.0 -> 1.2.0)
