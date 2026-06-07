@@ -16,11 +16,19 @@ set -euo pipefail
 # node-gyp pointed at ~/.electron-gyp/ and ends up rebuilding for Electron
 # anyway. Direct node-gyp calls use the current Node's headers and never
 # touch the Electron cache.
+#
+# node-gyp is invoked via `node <bin script>` (not `npx node-gyp`) because
+# on Windows runners the `.cmd` shim in node_modules/.bin combined with npx's
+# package resolution can fail silently — no binary gets produced, the
+# command returns 0, and tests later fail with "Could not locate the
+# bindings file". Calling the JS entry through node bypasses the shim.
+
+NODE_GYP_BIN="node_modules/node-gyp/bin/node-gyp.js"
 
 for pkg in better-sqlite3 node-pty; do
   if [ -d "node_modules/$pkg" ]; then
     echo "→ $pkg (Node $(node --version))"
     rm -rf "node_modules/$pkg/build"
-    npx node-gyp rebuild --directory="node_modules/$pkg"
+    node "$NODE_GYP_BIN" rebuild --directory="node_modules/$pkg"
   fi
 done

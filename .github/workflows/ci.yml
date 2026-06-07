@@ -28,6 +28,7 @@ jobs:
       # for the full rationale.
       - run: npm ci --ignore-scripts
       - name: Build native modules for system Node
+        shell: bash
         run: ./scripts/rebuild-native-for-node.sh
       - name: Install Electron binary
         run: node node_modules/electron/install.js
