@@ -90,6 +90,11 @@ export class SessionManager extends EventEmitter {
       if (!args.includes('--permission-mode')) args = ['--permission-mode', 'auto', ...args]
     }
 
+    // Pi must autotrust the working folder — append -a at spawn time.
+    if (isPi && !args.includes('-a')) {
+      args = [...args, '-a']
+    }
+
     const proc = pty.spawn(opts.harness.launch.command, args, {
       name: 'xterm-256color',
       cols: 120,
