@@ -20,9 +20,25 @@ vi.mock('electron', () => ({
 
 import { __openInMemoryDbForTesting, closeDb, getDb } from '../src/main/db'
 import * as store from '../src/main/store'
+import * as forges from '../src/main/forges'
 import { SIGNAL, consume as consumeSignal } from '../src/main/worktree/signals'
 import { brain } from '../src/main/brain/brain'
+import { ADVANCE_FNS } from '../src/main/dev/phases'
 import { DEFAULT_SETTINGS } from '../src/main/config/defaults'
+
+/**
+ * Stub the active forge by spying on the real module export (restored in
+ * afterEach). This replaces the older `vi.doMock('../forges') + re-import
+ * phases` pattern, which left the re-imported module bound to the REAL
+ * forgeForRepo — so `forge.findPrForBranch` shelled out to `gh` and hung on
+ * CI runners without a fast `gh`. The spy guarantees no real process spawns.
+ */
+function stubForge(forge: Record<string, unknown>): void {
+  vi.spyOn(forges, 'forgeForRepo').mockReturnValue({
+    forge,
+    config: {}
+  } as unknown as ReturnType<typeof forges.forgeForRepo>)
+}
 
 // We test against the default settings — override as needed per test.
 function setSettings(patch: Partial<typeof DEFAULT_SETTINGS>): void {
@@ -122,6 +138,7 @@ describe('dev phase advances', () => {
     worktreeDir = mkdtempSync(join(tmpdir(), 'autopilotv-test-'))
   })
   afterEach(() => {
+    vi.restoreAllMocks()
     rmSync(worktreeDir, { recursive: true, force: true })
     closeDb()
     closeDb()
@@ -145,17 +162,9 @@ describe('dev phase advances', () => {
     // Write the .pr-url signal that an implementing agent would write.
     writeFileSync(join(worktreeDir, SIGNAL.PR_URL), 'https://github.com/owner/repo/pull/42')
 
-    // Mock the forge — we only need findPrForBranch to return null so the
-    // code path goes through the .pr-url signal.
-    vi.doMock('../src/main/forges', () => ({
-      forgeForRepo: () => ({
-        forge: { findPrForBranch: vi.fn().mockResolvedValue(null) },
-        config: {}
-      })
-    }))
-    // Re-import after mock to pick it up.
-    const { ADVANCE_FNS: reimported } = await import('../src/main/dev/phases')
-    await reimported.implementing(store.getTask(taskId)!, store.getSettings())
+    // findPrForBranch returns null so the code path goes through the .pr-url signal.
+    stubForge({ findPrForBranch: vi.fn().mockResolvedValue(null) })
+    await ADVANCE_FNS.implementing(store.getTask(taskId)!, store.getSettings())
 
     const t = store.getTask(taskId)
     expect(t?.phase).toBe('draft')
@@ -176,14 +185,8 @@ describe('dev phase advances', () => {
     store.setTaskWorktree(taskId, wtId)
     store.setTaskPhase(taskId, 'implementing')
     // No .pr-url file. No live session.
-    vi.doMock('../src/main/forges', () => ({
-      forgeForRepo: () => ({
-        forge: { findPrForBranch: vi.fn().mockResolvedValue(null) },
-        config: {}
-      })
-    }))
-    const { ADVANCE_FNS: reimported } = await import('../src/main/dev/phases')
-    await reimported.implementing(store.getTask(taskId)!, store.getSettings())
+    stubForge({ findPrForBranch: vi.fn().mockResolvedValue(null) })
+    await ADVANCE_FNS.implementing(store.getTask(taskId)!, store.getSettings())
     expect(store.getTask(taskId)?.phase).toBe('error')
   })
 
@@ -203,14 +206,8 @@ describe('dev phase advances', () => {
     store.setTaskPhase(taskId, 'revising')
 
     writeFileSync(join(worktreeDir, SIGNAL.REVISE), '')
-    vi.doMock('../src/main/forges', () => ({
-      forgeForRepo: () => ({
-        forge: { findPrForBranch: vi.fn().mockResolvedValue({ isDraft: true, state: 'OPEN' }) },
-        config: {}
-      })
-    }))
-    const { ADVANCE_FNS: reimported } = await import('../src/main/dev/phases')
-    await reimported.revising(store.getTask(taskId)!, store.getSettings())
+    stubForge({ findPrForBranch: vi.fn().mockResolvedValue({ isDraft: true, state: 'OPEN' }) })
+    await ADVANCE_FNS.revising(store.getTask(taskId)!, store.getSettings())
     expect(store.getTask(taskId)?.phase).toBe('draft')
   })
 
