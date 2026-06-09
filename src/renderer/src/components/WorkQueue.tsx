@@ -1,8 +1,15 @@
 import { useState } from 'react'
-import type { AppState, PrReview, TrackerTask } from '@shared/types/domain'
+import type { AppState, PrReview, TaskVerification, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
 import { DiffView } from './DiffView'
 import { TYPE_COLOR, taskStateLabel } from '../theme'
+
+const VERIFY_COLOR: Record<TaskVerification['status'], string> = {
+  pass: 'var(--green)',
+  fail: 'var(--red)',
+  error: 'var(--orange)',
+  skipped: 'var(--comment)'
+}
 
 export function WorkQueue({ state }: { state: AppState }) {
   const openReviews = state.prReviews.filter(
@@ -56,7 +63,12 @@ export function WorkQueue({ state }: { state: AppState }) {
           <div className="empty">No tasks in enabled projects for the current sprint. Epics are excluded.</div>
         )}
         {openTasks.map((t) => (
-          <TaskRow key={`t${t.id}`} task={t} autoPublish={autoPublish} />
+          <TaskRow
+            key={`t${t.id}`}
+            task={t}
+            autoPublish={autoPublish}
+            verifications={state.taskVerifications.filter((v) => v.taskId === t.id)}
+          />
         ))}
       </section>
     </div>
@@ -115,7 +127,42 @@ function ReviewRow({ p }: { p: PrReview }) {
   )
 }
 
-function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolean }) {
+function VerifyBadge({ verifications }: { verifications: TaskVerification[] }) {
+  const cmd = verifications.find((v) => v.kind === 'command')
+  const spec = verifications.find((v) => v.kind === 'spec')
+  if (!cmd && !spec) return null
+  const label: Record<TaskVerification['status'], string> = {
+    pass: '✓ verified',
+    fail: '✗ verify failed',
+    error: '⚠ verify error',
+    skipped: 'verify skipped'
+  }
+  return (
+    <>
+      {cmd && (
+        <span className="state-tag" style={{ color: VERIFY_COLOR[cmd.status] }} title={cmd.summary}>
+          {' · '}
+          {label[cmd.status]}
+        </span>
+      )}
+      {spec && spec.status === 'fail' && (
+        <span className="state-tag" style={{ color: 'var(--orange)' }} title={spec.summary}>
+          {' · '}spec concerns
+        </span>
+      )}
+    </>
+  )
+}
+
+function TaskRow({
+  task,
+  autoPublish,
+  verifications
+}: {
+  task: TrackerTask
+  autoPublish: boolean
+  verifications: TaskVerification[]
+}) {
   const typeColor = TYPE_COLOR[task.issueType] ?? 'var(--comment)'
   // Reflect the real tracker status while unclaimed; show AutopilotV's phase once it's driving.
   const driving = task.phase !== 'unclaimed'
@@ -166,6 +213,9 @@ function TaskRow({ task, autoPublish }: { task: TrackerTask; autoPublish: boolea
           ) : null}
           {task.phase === 'implementing' && ' · working…'}
           {task.phase === 'in_review' && ' · babysitting'}
+          {(task.phase === 'in_review' || task.phase === 'ready_to_merge') && (
+            <VerifyBadge verifications={verifications} />
+          )}
         </span>
       </div>
       <div className="work-actions">

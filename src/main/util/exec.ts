@@ -44,6 +44,23 @@ export function exec(
   })
 }
 
+/**
+ * Run an operator-configured command line THROUGH a shell, so compound commands
+ * (`npm run lint && npm test`) and shell features work. Used for the per-repo
+ * verification command (theme B). The command string is configured by the
+ * operator (or auto-detected), never built from untrusted external data.
+ * Returns combined stdout, stderr, and exit code like `exec`.
+ */
+export function execShell(
+  command: string,
+  opts: ExecOptions = {}
+): Promise<ExecResult> {
+  const isWin = process.platform === 'win32'
+  const shell = isWin ? 'cmd.exe' : '/bin/sh'
+  const args = isWin ? ['/c', command] : ['-c', command]
+  return exec(shell, args, opts)
+}
+
 /** Like exec but throws on non-zero exit, returning stdout. */
 export async function execOrThrow(
   cmd: string,

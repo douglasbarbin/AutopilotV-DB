@@ -82,7 +82,7 @@ export function useAppState(): AppState | null {
   // hook will still re-render on any push, but the hook itself is now a thin
   // shim over the slice store.
   ensureBoot()
-  const ref = useRef<{ v: AppState | null; vTasks: AppState['tasks']; vSessions: AppState['sessions']; vReviews: AppState['prReviews']; vHarnesses: AppState['harnesses']; vRepos: AppState['repos']; vSettings: AppState['settings']; vEvents: AppState['events']; vBrainNotes: AppState['brainNotes']; vIntegrations: AppState['integrations']; vWorktrees: AppState['worktrees']; vProjects: AppState['trackerProjects']; vBrain: AppState['brain'] } | null>(null)
+  const ref = useRef<{ v: AppState | null; vTasks: AppState['tasks']; vSessions: AppState['sessions']; vReviews: AppState['prReviews']; vVerifications: AppState['taskVerifications']; vHarnesses: AppState['harnesses']; vRepos: AppState['repos']; vSettings: AppState['settings']; vEvents: AppState['events']; vBrainNotes: AppState['brainNotes']; vIntegrations: AppState['integrations']; vWorktrees: AppState['worktrees']; vProjects: AppState['trackerProjects']; vBrain: AppState['brain'] } | null>(null)
   const [state, setState] = useState<AppState | null>(ref.current?.v ?? null)
 
   useEffect(() => {
@@ -92,6 +92,7 @@ export function useAppState(): AppState | null {
         ref.current.vTasks === s.tasks &&
         ref.current.vSessions === s.sessions &&
         ref.current.vReviews === s.prReviews &&
+        ref.current.vVerifications === s.taskVerifications &&
         ref.current.vHarnesses === s.harnesses &&
         ref.current.vRepos === s.repos &&
         ref.current.vSettings === s.settings &&
@@ -109,6 +110,7 @@ export function useAppState(): AppState | null {
         vTasks: s.tasks,
         vSessions: s.sessions,
         vReviews: s.prReviews,
+        vVerifications: s.taskVerifications,
         vHarnesses: s.harnesses,
         vRepos: s.repos,
         vSettings: s.settings,
@@ -125,6 +127,7 @@ export function useAppState(): AppState | null {
       subscribeSlice('tasks', recompute),
       subscribeSlice('sessions', recompute),
       subscribeSlice('prReviews', recompute),
+      subscribeSlice('taskVerifications', recompute),
       subscribeSlice('harnesses', recompute),
       subscribeSlice('repos', recompute),
       subscribeSlice('settings', recompute),

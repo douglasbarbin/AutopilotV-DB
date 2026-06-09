@@ -30,7 +30,7 @@ export {
 
 export { seedIfEmpty, listHarnesses, getHarness, getReviewHarness, getBrainHarness, getCodingHarness, upsertHarness, deleteHarness, normalizeReviewDefault } from './harnesses'
 
-export { listRepos, getRepo, getRepoByName, upsertRepo, setRepoCloneState, resolveProjectRepo } from './repos'
+export { listRepos, getRepo, getRepoByName, upsertRepo, setRepoCloneState, setRepoVerifyCommand, resolveProjectRepo } from './repos'
 
 export {
   upsertTask,
@@ -43,6 +43,7 @@ export {
   setTaskPr,
   setTaskRepo,
   setTaskWorktree,
+  setTaskVerifiedSha,
   resetTask
 } from './tasks'
 
@@ -79,5 +80,9 @@ export { createWorktree, attachWorktreeSession, getWorktree, listWorktrees, list
 export { claimWork, setClaimState, attachSessionToWork, renewLease, releaseLease, reclaimExpiredLeases } from './claim'
 
 export { recordEvent, listEvents, recordBrainNote, listBrainNotes } from './events'
+
+export { insertVerification, listVerificationsForTask, listRecentVerifications } from './verifications'
+
+export * as metrics from './metrics'
 
 export { applyModelDefaults, runStartupNormalizations } from './migrations_apply'

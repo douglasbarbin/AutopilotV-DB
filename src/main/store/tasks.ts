@@ -22,6 +22,7 @@ interface TaskRow {
   session_id: number | null
   updated_at: string
   done_tracker_status: string
+  verified_sha: string
 }
 
 function rowToTask(r: TaskRow): TrackerTask {
@@ -43,7 +44,8 @@ function rowToTask(r: TaskRow): TrackerTask {
     worktreeId: r.worktree_id ?? null,
     claimState: r.claim_state as TrackerTask['claimState'],
     sessionId: r.session_id,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    verifiedSha: r.verified_sha ?? ''
   }
 }
 
@@ -156,13 +158,19 @@ export function setTaskWorktree(id: number, worktreeId: number): void {
   getDb().prepare('UPDATE tasks SET worktree_id = ? WHERE id = ?').run(worktreeId, id)
 }
 
+/** Record the commit SHA last run through the verification gate (theme B). */
+export function setTaskVerifiedSha(id: number, sha: string): void {
+  getDb().prepare('UPDATE tasks SET verified_sha = ? WHERE id = ?').run(sha, id)
+}
+
 /** Reset a dev task back to unclaimed so it can be retried from scratch. */
 export function resetTask(id: number): void {
   getDb()
     .prepare(
       `UPDATE tasks SET phase = 'unclaimed', claim_state = 'unclaimed', lease_owner = NULL,
        lease_expires_at = NULL, session_id = NULL, worktree_id = NULL, repo_id = NULL,
-       pr_number = NULL, pr_url = '', done_tracker_status = '', updated_at = datetime('now') WHERE id = ?`
+       pr_number = NULL, pr_url = '', done_tracker_status = '', verified_sha = '',
+       updated_at = datetime('now') WHERE id = ?`
     )
     .run(id)
 }

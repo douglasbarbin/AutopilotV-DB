@@ -2004,3 +2004,103 @@ button:disabled {
   font-size: 10px;
   color: var(--fg);
 }
+
+/* ── Metrics panel (theme D) ─────────────────────────────────────────── */
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.metrics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.metrics-section {
+  margin: 8px 0 0;
+}
+.metric-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg-strong);
+}
+.metric-label {
+  font-size: 12px;
+  color: var(--fg);
+  margin-top: 2px;
+}
+.metric-sub {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.scorecards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.scorecard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.scorecard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.scorecard-mini {
+  display: flex;
+  flex-direction: column;
+}
+.scorecard-mini-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+.scorecard-mini-label {
+  font-size: 10px;
+  color: var(--fg);
+  opacity: 0.8;
+}
+.scorecard-recs {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rec-chip {
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+}
+.metrics-foot {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+/* Per-repo verify command (theme B) */
+.repo-config-row {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}

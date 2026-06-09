@@ -2,6 +2,7 @@
 import type {
   AppState,
   HarnessConfig,
+  MetricsSnapshot,
   ReviewAction,
   Settings
 } from './domain'
@@ -43,6 +44,8 @@ export const Channels = {
   envCheck: 'env.check',
   secretSet: 'secret.set',
   gitGetDiff: 'git.getDiff',
+  metricsGet: 'metrics.get',
+  repoSetVerifyCommand: 'repo.setVerifyCommand',
   // streams (main -> renderer, send)
   evtState: 'evt.state',
   evtSessionOutput: 'evt.sessionOutput',
@@ -92,6 +95,7 @@ export type StateSlice =
   | 'trackerProjects'
   | 'prReviews'
   | 'reviews'
+  | 'taskVerifications'
   | 'sessions'
   | 'worktrees'
   | 'harnesses'
@@ -151,6 +155,8 @@ export interface AutopilotVApi {
   checkEnv(): Promise<EnvItem[]>
   setSecret(key: string, value: string): Promise<void>
   getDiff(opts: { worktreeId?: number; prNumber?: number; repoId?: number }): Promise<string>
+  getMetrics(): Promise<MetricsSnapshot>
+  setRepoVerifyCommand(repoId: number, command: string): Promise<void>
   // subscriptions return an unsubscribe fn
   onState(cb: (state: AppState) => void): () => void
   /**

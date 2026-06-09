@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 
 interface IconProps {
-  name: 'queue' | 'sessions' | 'reviews' | 'brain' | 'activity' | 'settings' | 'bolt' | 'dot' | 'play' | 'pause' | 'terminal'
+  name: 'queue' | 'sessions' | 'reviews' | 'brain' | 'activity' | 'settings' | 'bolt' | 'dot' | 'play' | 'pause' | 'terminal' | 'chart'
   size?: number
 }
 
@@ -56,6 +56,14 @@ const PATHS: Record<IconProps['name'], ReactElement> = {
     <>
       <polyline points="4 7 9 12 4 17" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </>
+  ),
+  chart: (
+    <>
+      <line x1="4" y1="20" x2="20" y2="20" />
+      <rect x="6" y="11" width="3" height="6" rx="0.5" />
+      <rect x="11" y="7" width="3" height="10" rx="0.5" />
+      <rect x="16" y="13" width="3" height="4" rx="0.5" />
     </>
   )
 }

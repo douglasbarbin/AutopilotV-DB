@@ -31,6 +31,16 @@ export const ReviewResultSchema = z.object({
 })
 export type ReviewResult = z.infer<typeof ReviewResultSchema>
 
+// Advisory diff-vs-ticket check (theme B). Does the change plausibly implement
+// what the ticket asked for? Surfaced to the human; never blocks promotion.
+export const SpecConformanceSchema = z.object({
+  conforms: z.boolean(),
+  confidence: z.enum(['low', 'medium', 'high']),
+  concerns: z.array(z.string()),
+  summary: z.string()
+})
+export type SpecConformance = z.infer<typeof SpecConformanceSchema>
+
 export interface JudgeRequest {
   system: string
   user: string

@@ -278,6 +278,17 @@ export function registerIpc(): void {
     return 'No diff context.'
   })
 
+  handle(Channels.metricsGet, async () => {
+    const { computeMetrics } = await import('./metrics/scorecard')
+    return computeMetrics()
+  })
+
+  handle(Channels.repoSetVerifyCommand, async (repoId: number, command: string) => {
+    store.setRepoVerifyCommand(repoId, command)
+    store.recordEvent('repo.verify_command_set', { repoId })
+    pushState()
+  })
+
   // ---- main -> renderer wiring ----
   sessionManager.on('output', (chunk) => {
     for (const win of BrowserWindow.getAllWindows()) {

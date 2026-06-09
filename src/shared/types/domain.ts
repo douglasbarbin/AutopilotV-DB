@@ -47,6 +47,9 @@ export interface Repo {
   /** Which code forge owns this repo (github, azuredevops). Set at upsert time
    *  from the active forge setting; never re-derived afterwards. */
   forge: string
+  /** Operator-configured verification command (test/build/lint) run before a
+   *  dev PR is surfaced as ready_to_merge. null/undefined = auto-detect or skip. */
+  verifyCommand?: string | null
 }
 
 export interface TrackerProject {
@@ -76,6 +79,23 @@ export interface TrackerTask {
   claimState: ClaimState
   sessionId: number | null
   updatedAt: string
+  /** Commit SHA last run through the verification gate (theme B). Empty until
+   *  the first verification; used to avoid re-running on an unchanged commit. */
+  verifiedSha: string
+}
+
+/** One verification verdict for a dev task at a given commit (theme B). */
+export interface TaskVerification {
+  id: number
+  taskId: number
+  prNumber: number | null
+  commitSha: string
+  /** 'command' = ran the repo's test/build command; 'spec' = LLM diff-vs-ticket. */
+  kind: 'command' | 'spec'
+  status: 'pass' | 'fail' | 'error' | 'skipped'
+  summary: string
+  detail: Record<string, unknown>
+  createdAt: string
 }
 
 export interface PrReview {
@@ -237,11 +257,68 @@ export interface Settings {
   mergePolicy: 'await_user'
   autoPublish: boolean
   requiredApprovals: number
+  /** Theme B: run the repo's verify command before promoting to ready_to_merge,
+   *  blocking promotion and auto-spawning a fix session on failure. */
+  verifyBeforeReady: boolean
+  /** Theme B: also run the advisory LLM diff-vs-ticket spec-conformance check. */
+  verifySpecConformance: boolean
+  /** Theme B: max seconds the verify command may run before it's treated as failed. */
+  verifyTimeoutSeconds: number
   agentsTemplate: string
   branchPrefix: string
   terminalCommand: string
   theme: string
   onboarded: boolean
+}
+
+// ──────────────────────────── metrics (theme D) ────────────────────────────
+// Cost/quality scorecards computed purely from existing history (sessions,
+// tasks, events) — time / rework / outcome, no token scraping. Delivered on
+// demand via the metrics.get IPC, not as part of the per-push AppState delta.
+
+export interface HarnessScorecard {
+  harnessId: string
+  displayName: string
+  sessionsTotal: number
+  sessionsDev: number
+  sessionsReview: number
+  /** Mean / median duration in minutes over terminal (exited/killed) sessions. */
+  avgSessionMinutes: number | null
+  medianSessionMinutes: number | null
+  endedNeedsHuman: number
+  endedKilled: number
+  reviewsCaptured: number
+  /** Count of review verdicts by recommendation produced under this harness. */
+  reviewRecommendations: Record<string, number>
+}
+
+export interface DevThroughput {
+  tasksMerged: number
+  tasksMerged7d: number
+  tasksMerged30d: number
+  /** Means in minutes; null when there's no completed sample yet. */
+  avgTimeToReadyMinutes: number | null
+  avgTimeToMergeMinutes: number | null
+  /** Mean rework cycles (changes-requested + verification-fix rounds) per merged task. */
+  avgReworkCycles: number | null
+  resets: number
+  /** Fraction of command verifications that passed (0..1), or null if none run. */
+  verificationPassRate: number | null
+}
+
+export interface ReviewStats {
+  completed: number
+  recommendations: Record<string, number>
+  avgReviewMinutes: number | null
+  /** Fraction of acted-on reviews the human approved (0..1), or null. */
+  humanApproveRate: number | null
+}
+
+export interface MetricsSnapshot {
+  generatedAt: string
+  harnesses: HarnessScorecard[]
+  dev: DevThroughput
+  review: ReviewStats
 }
 
 // The full snapshot pushed to the renderer.
@@ -250,6 +327,7 @@ export interface AppState {
   trackerProjects: TrackerProject[]
   prReviews: PrReview[]
   reviews: ReviewSummary[]
+  taskVerifications: TaskVerification[]
   sessions: Session[]
   worktrees: Worktree[]
   harnesses: HarnessConfig[]

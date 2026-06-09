@@ -202,6 +202,26 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
 
   if (task.phase === 'in_review') {
     if (satisfied) {
+      // Independent verification gate (theme B): run the repo's own test/build
+      // command on the pushed branch before surfacing the PR as ready_to_merge.
+      // A failure keeps the task in review, records it, and auto-spawns a fix
+      // session; only a new pushed commit re-triggers verification.
+      if (settings.verifyBeforeReady) {
+        const { verifyTaskForMerge } = await import('./verify')
+        const verdict = await verifyTaskForMerge(task, settings)
+        if (!verdict.ok) {
+          if (!isTaskSessionActive(task)) {
+            await startVerificationFix(task, repo, worktree, verdict.failureSummary ?? 'Verification failed.')
+            notifier.notify({
+              kind: 'needs_human',
+              title: `Verification failed — ${task.issueKey}`,
+              body: `PR #${task.prNumber} passed review gates but failed verification. Auto-fixing.`,
+              deepLink: { type: 'task', id: task.id }
+            })
+          }
+          return
+        }
+      }
       killTaskSessionIfLive(task, 'ready to merge')
       store.setTaskPhase(task.id, 'ready_to_merge')
       store.recordEvent('dev.ready_to_merge', { taskId: task.id, prNumber: task.prNumber })
@@ -270,6 +290,52 @@ async function startAddressComments(
   })
   store.attachSessionToWork('dev', task.id, sessionId)
   note('dev', `${task.issueKey}: addressing review feedback on PR #${task.prNumber}.`, { key: task.issueKey })
+}
+
+/**
+ * Spawn a fix session after independent verification failed (theme B). Reuses
+ * the existing worktree and the `.address-comments` completion signal, so the
+ * normal re-check path applies; the agent's new commit changes the branch SHA,
+ * which re-triggers verification on the next tick.
+ */
+async function startVerificationFix(
+  task: TrackerTask,
+  repo: Repo,
+  worktree: { path: string; id: number } | null,
+  failureSummary: string
+): Promise<void> {
+  if (!worktree) return
+  const harness = store.getCodingHarness()
+  if (!harness) return
+
+  const { writeAdjacentWorkFile } = await import('../worktree/manager')
+  await writeAdjacentWorkFile(worktree.path, repo.id)
+
+  const prompt =
+    `Automated verification FAILED for PR #${task.prNumber} (${repo.name}) before it could be marked ready to merge.\n\n` +
+    `Verification output:\n${failureSummary.slice(0, 3000)}\n\n` +
+    `Diagnose and fix the failure in this worktree on the PR's branch, commit, and push to update the existing PR. ` +
+    `Do NOT open a new PR. ` +
+    `When you have committed and pushed the fix, signal completion by creating an empty file ` +
+    `named ${SIGNAL.ADDRESS_COMMENTS} in this directory (e.g. \`touch ${SIGNAL.ADDRESS_COMMENTS}\`). ` +
+    `That file tells the orchestrator to re-check and re-verify the PR.\n\n` +
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
+
+  const sessionId = sessionManager.spawn({
+    kind: 'dev',
+    workRef: `dev:${task.id}`,
+    harness,
+    cwd: worktree.path,
+    env: process.env,
+    worktreeId: worktree.id,
+    title: `${task.issueKey} fix verification`.slice(0, 80),
+    initialInput: prompt
+  })
+  store.attachSessionToWork('dev', task.id, sessionId)
+  store.recordEvent('dev.verify_fix_started', { taskId: task.id, prNumber: task.prNumber })
+  note('dev', `${task.issueKey}: verification failed on PR #${task.prNumber} — spawned a fix session.`, {
+    key: task.issueKey
+  }, 'warn')
 }
 
 /** PR merged → stop tracking. Prune the worktree; do NOT touch the tracker

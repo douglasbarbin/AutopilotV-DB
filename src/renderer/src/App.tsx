@@ -8,6 +8,7 @@ import { ReviewCards } from './components/ReviewCards'
 import { SettingsPanel } from './components/SettingsPanel'
 import { EventsLog } from './components/EventsLog'
 import { BrainPanel } from './components/BrainPanel'
+import { MetricsPanel } from './components/MetricsPanel'
 import { Onboarding } from './components/Onboarding'
 import { About } from './components/About'
 import { Icon } from './components/Icon'
@@ -19,13 +20,14 @@ import logoUrl from '../../../build/icon.png'
 import { api } from './api'
 import type { NotificationPayload } from '@shared/types/ipc'
 
-type Tab = 'work' | 'sessions' | 'reviews' | 'brain' | 'events' | 'settings'
+type Tab = 'work' | 'sessions' | 'reviews' | 'brain' | 'metrics' | 'events' | 'settings'
 
 const NAV: { id: Tab; label: string; icon: Parameters<typeof Icon>[0]['name'] }[] = [
   { id: 'work', label: 'Work Queue', icon: 'queue' },
   { id: 'sessions', label: 'Sessions', icon: 'sessions' },
   { id: 'reviews', label: 'Reviews', icon: 'reviews' },
   { id: 'brain', label: 'Brain', icon: 'brain' },
+  { id: 'metrics', label: 'Metrics', icon: 'chart' },
   { id: 'events', label: 'Activity', icon: 'activity' },
   { id: 'settings', label: 'Settings', icon: 'settings' }
 ]
@@ -79,6 +81,7 @@ export function App() {
     sessions: 'Sessions',
     reviews: 'Reviews',
     brain: 'Brain',
+    metrics: 'Metrics',
     events: 'Activity',
     settings: 'Settings'
   }
@@ -180,6 +183,7 @@ export function App() {
           {tab === 'sessions' && <SessionGrid sessions={state.sessions} theme={state.settings.theme} />}
           {tab === 'reviews' && <ReviewCards state={state} />}
           {tab === 'brain' && <BrainPanel state={state} />}
+          {tab === 'metrics' && <MetricsPanel />}
           {tab === 'events' && <EventsLog state={state} />}
           {tab === 'settings' && <SettingsPanel state={state} />}
         </main>

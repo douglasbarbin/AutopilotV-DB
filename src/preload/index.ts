@@ -57,6 +57,10 @@ const api: AutopilotVApi = {
     ipcRenderer.invoke(Channels.secretSet, key, value) as Promise<void>,
   getDiff: (opts: { worktreeId?: number; prNumber?: number; repoId?: number }) =>
     ipcRenderer.invoke(Channels.gitGetDiff, opts) as Promise<string>,
+  getMetrics: () =>
+    ipcRenderer.invoke(Channels.metricsGet) as Promise<import('@shared/types/domain').MetricsSnapshot>,
+  setRepoVerifyCommand: (repoId: number, command: string) =>
+    ipcRenderer.invoke(Channels.repoSetVerifyCommand, repoId, command) as Promise<void>,
   onState: (cb: (state: AppState) => void) => {
     const fn = (_e: unknown, state: AppState) => cb(state)
     ipcRenderer.on(Channels.evtState, fn)

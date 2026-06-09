@@ -376,6 +376,41 @@ export function SettingsPanel({ state }: { state: AppState }) {
       </section>
 
       <section>
+        <h3>Verification</h3>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            defaultChecked={s.verifyBeforeReady}
+            onChange={(e) => patch({ verifyBeforeReady: e.target.checked })}
+          />
+          Verify before ready-to-merge (run the repo's verify command; auto-fix on failure)
+        </label>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            defaultChecked={s.verifySpecConformance}
+            onChange={(e) => patch({ verifySpecConformance: e.target.checked })}
+          />
+          Also run the advisory spec-conformance check (LLM compares the diff to the ticket)
+        </label>
+        <label>
+          Verify command timeout (s)
+          <input
+            type="number"
+            min={30}
+            defaultValue={s.verifyTimeoutSeconds}
+            onBlur={(e) => patch({ verifyTimeoutSeconds: Number(e.target.value) })}
+          />
+        </label>
+        <p className="hint">
+          Before a PR that passed the review gates is surfaced as ready-to-merge, AutopilotV runs
+          the repo's own verify command on the pushed branch. A failure keeps the task in review,
+          records the output, and spawns a fix session; only a new pushed commit re-verifies. Set
+          the per-repo command in <strong>Repos</strong> below (blank = auto-detect / skip).
+        </p>
+      </section>
+
+      <section>
         <h3>Auto-drive</h3>
         <label className="checkbox">
           <input
@@ -546,16 +581,32 @@ function RepoList({ state }: { state: AppState }) {
         </div>
       )}
       {state.repos.map((r) => (
-        <div className="harness-row" key={r.id}>
-          <div>
-            <strong>{r.name}</strong>
-            <span className={`badge ${r.cloneState === 'present' ? 'task' : 'review'}`}>
-              {r.cloneState}
-            </span>
+        <div className="repo-config-row" key={r.id}>
+          <div className="harness-row">
+            <div>
+              <strong>{r.name}</strong>
+              <span className={`badge ${r.cloneState === 'present' ? 'task' : 'review'}`}>
+                {r.cloneState}
+              </span>
+            </div>
+            <code>{r.path ?? '— not cloned locally —'}</code>
           </div>
-          <code>{r.path ?? '— not cloned locally —'}</code>
+          <label>
+            Verify command
+            <input
+              key={r.verifyCommand ?? ''}
+              defaultValue={r.verifyCommand ?? ''}
+              placeholder="blank = auto-detect (e.g. npm test) or skip"
+              onBlur={(e) => void api.setRepoVerifyCommand(r.id, e.target.value)}
+            />
+          </label>
         </div>
       ))}
+      <p className="hint">
+        The verify command runs in the task's worktree (through a shell, so{' '}
+        <code>npm run lint &amp;&amp; npm test</code> works) before a PR is surfaced as
+        ready-to-merge. Leave blank to auto-detect from <code>package.json</code> or skip.
+      </p>
     </section>
   )
 }

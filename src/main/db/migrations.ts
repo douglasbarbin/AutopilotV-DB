@@ -213,6 +213,32 @@ const MIGRATIONS: Migration[] = [
     -- Drop the column.
     ALTER TABLE harnesses DROP COLUMN is_review_default;
     `
+  },
+  {
+    // Independent verification (theme B): before a dev task is surfaced as
+    // ready_to_merge, AutopilotV runs the repo's own test/build command in the
+    // worktree and (advisory) checks the diff against the ticket.
+    //   - repos.verify_command: operator-configured command; NULL = auto-detect/skip.
+    //   - tasks.verified_sha: the commit we last verified, so a satisfied gate
+    //     doesn't re-run the command every tick — only a new pushed commit does.
+    //   - task_verifications: one row per (commit, dimension) verdict.
+    version: 12,
+    up: `
+    ALTER TABLE repos ADD COLUMN verify_command TEXT;
+    ALTER TABLE tasks ADD COLUMN verified_sha TEXT NOT NULL DEFAULT '';
+    CREATE TABLE task_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      pr_number INTEGER,
+      commit_sha TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_task_verifications_task ON task_verifications(task_id);
+    `
   }
 ]
 

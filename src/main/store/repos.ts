@@ -12,6 +12,7 @@ interface RepoRow {
   default_branch: string
   clone_state: string
   forge: string | null
+  verify_command: string | null
 }
 
 function rowToRepo(r: RepoRow): Repo {
@@ -22,7 +23,8 @@ function rowToRepo(r: RepoRow): Repo {
     remote: r.remote,
     defaultBranch: r.default_branch,
     cloneState: r.clone_state as Repo['cloneState'],
-    forge: r.forge ?? 'github'
+    forge: r.forge ?? 'github',
+    verifyCommand: r.verify_command
   }
 }
 
@@ -70,6 +72,12 @@ export function setRepoCloneState(id: number, state: Repo['cloneState'], path?: 
   getDb()
     .prepare('UPDATE repos SET clone_state = ?, path = COALESCE(?, path) WHERE id = ?')
     .run(state, path ?? null, id)
+}
+
+/** Set (or clear, with an empty/blank value) the repo's verification command. */
+export function setRepoVerifyCommand(id: number, command: string): void {
+  const value = command.trim() || null
+  getDb().prepare('UPDATE repos SET verify_command = ? WHERE id = ?').run(value, id)
 }
 
 /**

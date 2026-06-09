@@ -31,6 +31,7 @@ export function buildState(): AppState {
     trackerProjects: store.listTrackerProjects(),
     prReviews: store.listPrReviews(),
     reviews: store.listReviews(),
+    taskVerifications: store.listRecentVerifications(),
     sessions: store.listSessions(),
     worktrees: store.listWorktrees(),
     harnesses: store.listHarnesses(),
@@ -87,6 +88,7 @@ function computeDelta(state: AppState): StateDelta {
       'trackerProjects',
       'prReviews',
       'reviews',
+      'taskVerifications',
       'sessions',
       'worktrees',
       'harnesses',
@@ -102,6 +104,7 @@ function computeDelta(state: AppState): StateDelta {
     if (state.trackerProjects !== lastState.trackerProjects) changed.push('trackerProjects')
     if (state.prReviews !== lastState.prReviews) changed.push('prReviews')
     if (state.reviews !== lastState.reviews) changed.push('reviews')
+    if (state.taskVerifications !== lastState.taskVerifications) changed.push('taskVerifications')
     if (state.sessions !== lastState.sessions) changed.push('sessions')
     if (state.worktrees !== lastState.worktrees) changed.push('worktrees')
     if (state.harnesses !== lastState.harnesses) changed.push('harnesses')
