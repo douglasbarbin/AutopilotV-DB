@@ -239,6 +239,18 @@ const MIGRATIONS: Migration[] = [
     );
     CREATE INDEX idx_task_verifications_task ON task_verifications(task_id);
     `
+  },
+  {
+    // Address review feedback at most once per PR head commit. GitHub's
+    // "changes requested" review state is sticky — it stays true until the
+    // reviewer re-reviews or dismisses, even after every thread is resolved and
+    // a fix is pushed. Without a marker the brain re-spawns an address-comments
+    // session every tick on that sticky flag. addressed_sha records the head
+    // commit we last addressed so we do it once, then wait for the state to change.
+    version: 13,
+    up: `
+    ALTER TABLE tasks ADD COLUMN addressed_sha TEXT NOT NULL DEFAULT '';
+    `
   }
 ]
 

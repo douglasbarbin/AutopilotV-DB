@@ -23,6 +23,7 @@ interface TaskRow {
   updated_at: string
   done_tracker_status: string
   verified_sha: string
+  addressed_sha: string
 }
 
 function rowToTask(r: TaskRow): TrackerTask {
@@ -45,7 +46,8 @@ function rowToTask(r: TaskRow): TrackerTask {
     claimState: r.claim_state as TrackerTask['claimState'],
     sessionId: r.session_id,
     updatedAt: r.updated_at,
-    verifiedSha: r.verified_sha ?? ''
+    verifiedSha: r.verified_sha ?? '',
+    addressedSha: r.addressed_sha ?? ''
   }
 }
 
@@ -163,6 +165,11 @@ export function setTaskVerifiedSha(id: number, sha: string): void {
   getDb().prepare('UPDATE tasks SET verified_sha = ? WHERE id = ?').run(sha, id)
 }
 
+/** Record the PR head commit at which review feedback was last addressed. */
+export function setTaskAddressedSha(id: number, sha: string): void {
+  getDb().prepare('UPDATE tasks SET addressed_sha = ? WHERE id = ?').run(sha, id)
+}
+
 /** Reset a dev task back to unclaimed so it can be retried from scratch. */
 export function resetTask(id: number): void {
   getDb()
@@ -170,7 +177,7 @@ export function resetTask(id: number): void {
       `UPDATE tasks SET phase = 'unclaimed', claim_state = 'unclaimed', lease_owner = NULL,
        lease_expires_at = NULL, session_id = NULL, worktree_id = NULL, repo_id = NULL,
        pr_number = NULL, pr_url = '', done_tracker_status = '', verified_sha = '',
-       updated_at = datetime('now') WHERE id = ?`
+       addressed_sha = '', updated_at = datetime('now') WHERE id = ?`
     )
     .run(id)
 }

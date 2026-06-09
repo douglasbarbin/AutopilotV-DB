@@ -82,6 +82,9 @@ export interface TrackerTask {
   /** Commit SHA last run through the verification gate (theme B). Empty until
    *  the first verification; used to avoid re-running on an unchanged commit. */
   verifiedSha: string
+  /** PR head commit at which review feedback was last addressed. Stops a sticky
+   *  "changes requested" review from re-spawning address-comments every tick. */
+  addressedSha: string
 }
 
 /** One verification verdict for a dev task at a given commit (theme B). */

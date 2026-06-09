@@ -44,6 +44,7 @@ export {
   setTaskRepo,
   setTaskWorktree,
   setTaskVerifiedSha,
+  setTaskAddressedSha,
   resetTask
 } from './tasks'
 

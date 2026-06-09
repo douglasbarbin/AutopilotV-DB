@@ -6,6 +6,7 @@ import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
 import { notifier } from '../notify'
 import { SIGNAL, isSignalled, clear as clearSignal } from '../worktree/signals'
+import { verifyTaskForMerge, currentSha } from './verify'
 import type { TrackerTask, Repo, Settings, DevPhase } from '@shared/types/domain'
 
 /**
@@ -188,6 +189,10 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
   if (addrSignalled && worktree) {
     clearSignal(worktree.path, SIGNAL.ADDRESS_COMMENTS)
     killTaskSessionIfLive(task, 'comments addressed')
+    // Record the commit we just pushed so a sticky "changes requested" review
+    // doesn't re-spawn another round on the same work.
+    const pushed = await currentSha(worktree.path)
+    if (pushed) store.setTaskAddressedSha(task.id, pushed)
     note('dev', `${task.issueKey}: finished addressing review comments on PR #${task.prNumber}.`, {
       key: task.issueKey
     })
@@ -207,7 +212,6 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
       // A failure keeps the task in review, records it, and auto-spawns a fix
       // session; only a new pushed commit re-triggers verification.
       if (settings.verifyBeforeReady) {
-        const { verifyTaskForMerge } = await import('./verify')
         const verdict = await verifyTaskForMerge(task, settings)
         if (!verdict.ok) {
           if (!isTaskSessionActive(task)) {
@@ -237,15 +241,26 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
         deepLink: { type: 'task', id: task.id }
       })
     } else if ((r.changesRequested || r.unresolvedThreads > 0) && !isTaskSessionActive(task)) {
-      // Spawn a session to address feedback in the existing worktree.
-      await startAddressComments(task, repo, worktree)
+      // Address feedback AT MOST ONCE per PR head commit. GitHub's "changes
+      // requested" review state is sticky (stays true until the reviewer
+      // re-reviews or dismisses), so spawning whenever it's set loops forever
+      // even after every thread is resolved and the fix is pushed. Gating on
+      // the head SHA means we do one round, record the resulting commit, then
+      // wait for the review state to change instead of re-implementing.
+      const headSha = worktree ? await currentSha(worktree.path) : ''
+      if (headSha && headSha !== task.addressedSha) {
+        store.setTaskAddressedSha(task.id, headSha)
+        await startAddressComments(task, repo, worktree)
+      }
     }
     return
   }
 
   // ready_to_merge: regressed? (new changes requested) → back to in_review.
+  // Clear addressed_sha so this fresh feedback gets exactly one address round.
   if (!satisfied && (r.changesRequested || r.unresolvedThreads > 0)) {
     store.setTaskPhase(task.id, 'in_review')
+    store.setTaskAddressedSha(task.id, '')
     note('dev', `${task.issueKey} got new feedback — back to addressing comments.`, {}, 'warn')
   }
 }
