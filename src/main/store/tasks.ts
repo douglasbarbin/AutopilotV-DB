@@ -24,6 +24,7 @@ interface TaskRow {
   done_tracker_status: string
   verified_sha: string
   addressed_sha: string
+  addressed_threads: number
 }
 
 function rowToTask(r: TaskRow): TrackerTask {
@@ -47,7 +48,8 @@ function rowToTask(r: TaskRow): TrackerTask {
     sessionId: r.session_id,
     updatedAt: r.updated_at,
     verifiedSha: r.verified_sha ?? '',
-    addressedSha: r.addressed_sha ?? ''
+    addressedSha: r.addressed_sha ?? '',
+    addressedThreads: r.addressed_threads ?? 0
   }
 }
 
@@ -165,9 +167,16 @@ export function setTaskVerifiedSha(id: number, sha: string): void {
   getDb().prepare('UPDATE tasks SET verified_sha = ? WHERE id = ?').run(sha, id)
 }
 
-/** Record the PR head commit at which review feedback was last addressed. */
-export function setTaskAddressedSha(id: number, sha: string): void {
-  getDb().prepare('UPDATE tasks SET addressed_sha = ? WHERE id = ?').run(sha, id)
+/**
+ * Record the PR head commit AND unresolved-thread count at which review feedback
+ * was last addressed. Together they gate re-spawning: a sticky "changes
+ * requested" review with the same commit and no new comments won't re-trigger,
+ * but a new commit or an additional comment will.
+ */
+export function setTaskAddressed(id: number, sha: string, threads: number): void {
+  getDb()
+    .prepare('UPDATE tasks SET addressed_sha = ?, addressed_threads = ? WHERE id = ?')
+    .run(sha, threads, id)
 }
 
 /** Reset a dev task back to unclaimed so it can be retried from scratch. */
@@ -177,7 +186,7 @@ export function resetTask(id: number): void {
       `UPDATE tasks SET phase = 'unclaimed', claim_state = 'unclaimed', lease_owner = NULL,
        lease_expires_at = NULL, session_id = NULL, worktree_id = NULL, repo_id = NULL,
        pr_number = NULL, pr_url = '', done_tracker_status = '', verified_sha = '',
-       addressed_sha = '', updated_at = datetime('now') WHERE id = ?`
+       addressed_sha = '', addressed_threads = 0, updated_at = datetime('now') WHERE id = ?`
     )
     .run(id)
 }

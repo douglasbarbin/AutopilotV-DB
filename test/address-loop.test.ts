@@ -103,6 +103,25 @@ describe('address-comments loop prevention', () => {
     expect(spawnSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('re-addresses when an additional comment arrives on the same commit', async () => {
+    const id = seedReviewTask()
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+    // Same sticky state, same commit → no respawn.
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+
+    // Reviewer leaves an additional comment (a new unresolved thread) on the
+    // SAME commit → one fresh round.
+    h.readiness = { ...h.readiness, unresolvedThreads: 1 }
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
+
+    // No further new comments → it waits again.
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
+  })
+
   it('addresses again once the PR head advances (new commit)', async () => {
     const id = seedReviewTask()
     await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())

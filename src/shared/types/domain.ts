@@ -85,6 +85,10 @@ export interface TrackerTask {
   /** PR head commit at which review feedback was last addressed. Stops a sticky
    *  "changes requested" review from re-spawning address-comments every tick. */
   addressedSha: string
+  /** Unresolved-thread count when feedback was last addressed. A higher current
+   *  count means an additional comment arrived, which re-triggers a round even
+   *  on the same commit. */
+  addressedThreads: number
 }
 
 /** One verification verdict for a dev task at a given commit (theme B). */

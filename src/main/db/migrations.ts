@@ -251,6 +251,16 @@ const MIGRATIONS: Migration[] = [
     up: `
     ALTER TABLE tasks ADD COLUMN addressed_sha TEXT NOT NULL DEFAULT '';
     `
+  },
+  {
+    // Re-address when an ADDITIONAL comment arrives, even on the same commit.
+    // addressed_threads records the unresolved-thread count at the moment we
+    // last addressed feedback; a higher current count means a new comment came
+    // in, so we run another round rather than waiting on the stale head SHA.
+    version: 14,
+    up: `
+    ALTER TABLE tasks ADD COLUMN addressed_threads INTEGER NOT NULL DEFAULT 0;
+    `
   }
 ]
 

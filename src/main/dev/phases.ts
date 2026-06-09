@@ -189,10 +189,11 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
   if (addrSignalled && worktree) {
     clearSignal(worktree.path, SIGNAL.ADDRESS_COMMENTS)
     killTaskSessionIfLive(task, 'comments addressed')
-    // Record the commit we just pushed so a sticky "changes requested" review
-    // doesn't re-spawn another round on the same work.
+    // Record the commit we just pushed and the current open-thread count, so a
+    // sticky "changes requested" review doesn't re-spawn another round on the
+    // same work — but a later additional comment (higher count) still will.
     const pushed = await currentSha(worktree.path)
-    if (pushed) store.setTaskAddressedSha(task.id, pushed)
+    if (pushed) store.setTaskAddressed(task.id, pushed, r.unresolvedThreads)
     note('dev', `${task.issueKey}: finished addressing review comments on PR #${task.prNumber}.`, {
       key: task.issueKey
     })
@@ -241,15 +242,18 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
         deepLink: { type: 'task', id: task.id }
       })
     } else if ((r.changesRequested || r.unresolvedThreads > 0) && !isTaskSessionActive(task)) {
-      // Address feedback AT MOST ONCE per PR head commit. GitHub's "changes
-      // requested" review state is sticky (stays true until the reviewer
-      // re-reviews or dismisses), so spawning whenever it's set loops forever
-      // even after every thread is resolved and the fix is pushed. Gating on
-      // the head SHA means we do one round, record the resulting commit, then
-      // wait for the review state to change instead of re-implementing.
+      // Address feedback when there's something NEW to do, then wait. GitHub's
+      // "changes requested" review state is sticky (stays true until the
+      // reviewer re-reviews or dismisses), so spawning whenever it's set loops
+      // forever even after every thread is resolved and the fix is pushed. We
+      // run a round only when the PR head advanced since we last addressed
+      // (newCommit) OR an additional comment arrived (more unresolved threads
+      // than we last handled); otherwise we wait for the review state to change.
       const headSha = worktree ? await currentSha(worktree.path) : ''
-      if (headSha && headSha !== task.addressedSha) {
-        store.setTaskAddressedSha(task.id, headSha)
+      const newCommit = !!headSha && headSha !== task.addressedSha
+      const moreComments = r.unresolvedThreads > task.addressedThreads
+      if (headSha && (newCommit || moreComments)) {
+        store.setTaskAddressed(task.id, headSha, r.unresolvedThreads)
         await startAddressComments(task, repo, worktree)
       }
     }
@@ -260,7 +264,7 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
   // Clear addressed_sha so this fresh feedback gets exactly one address round.
   if (!satisfied && (r.changesRequested || r.unresolvedThreads > 0)) {
     store.setTaskPhase(task.id, 'in_review')
-    store.setTaskAddressedSha(task.id, '')
+    store.setTaskAddressed(task.id, '', 0)
     note('dev', `${task.issueKey} got new feedback — back to addressing comments.`, {}, 'warn')
   }
 }
