@@ -6,7 +6,6 @@ import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
 import { notifier } from '../notify'
 import { SIGNAL, isSignalled, clear as clearSignal } from '../worktree/signals'
-import { verifyTaskForMerge, currentSha } from './verify'
 import type { TrackerTask, Repo, Settings, DevPhase } from '@shared/types/domain'
 
 /**
@@ -183,6 +182,12 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
     note('dev', `PR #${task.prNumber} for ${task.issueKey} was closed — no longer tracking.`, {}, 'warn')
     return
   }
+
+  // Lazily load the verification helpers. Imported here (not at module top) so
+  // that re-importing this module under a mocked '../forges' — as the
+  // orchestration tests do — doesn't eagerly evaluate verify → forges/provider/
+  // store and deadlock the test module resolver.
+  const { verifyTaskForMerge, currentSha } = await import('./verify')
 
   // Consume any address-comments signal.
   const addrSignalled = worktree ? isSignalled(worktree.path, SIGNAL.ADDRESS_COMMENTS) : false

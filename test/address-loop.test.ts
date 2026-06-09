@@ -16,27 +16,25 @@ vi.mock('electron', () => ({
   Notification: { isSupported: () => false }
 }))
 
-// Mutable PR readiness the mocked forge returns. Sticky changes-requested with
-// zero unresolved threads — exactly the loop the user hit.
-const h = vi.hoisted(() => ({
-  readiness: {
-    state: 'OPEN' as const,
-    mergeable: false,
-    statusOk: false,
-    approvals: 0,
-    changesRequested: true,
-    unresolvedThreads: 0
-  }
-}))
-
-vi.mock('../src/main/forges', () => ({
-  forgeForRepo: () => ({ forge: { getPrReadiness: async () => h.readiness }, config: {} })
-}))
-
 import { __openInMemoryDbForTesting, closeDb } from '../src/main/db'
 import * as store from '../src/main/store'
+import * as forges from '../src/main/forges'
 import { sessionManager } from '../src/main/sessions/manager'
 import { ADVANCE_FNS } from '../src/main/dev/phases'
+
+// Mutable PR readiness our spied forge returns. Sticky changes-requested with
+// zero unresolved threads — exactly the loop the user hit. We spy on
+// forgeForRepo (and restore it in afterEach) rather than vi.mock the whole
+// module, so this file can't leak its forge into other test files when the
+// runner shares the module registry (e.g. CI without per-file isolation).
+let readiness = {
+  state: 'OPEN' as const,
+  mergeable: false,
+  statusOk: false,
+  approvals: 0,
+  changesRequested: true,
+  unresolvedThreads: 0
+}
 
 function git(cwd: string, ...args: string[]): void {
   exec('git', args, { cwd, stdio: 'ignore' })
@@ -47,7 +45,7 @@ describe('address-comments loop prevention', () => {
   let spawnSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    h.readiness = {
+    readiness = {
       state: 'OPEN',
       mergeable: false,
       statusOk: false,
@@ -64,11 +62,16 @@ describe('address-comments loop prevention', () => {
     wf(join(repoDir, 'a.txt'), 'one')
     git(repoDir, 'add', '-A')
     git(repoDir, 'commit', '-qm', 'first')
-    // Spy on spawn so no real PTY launches; return a fake (dead) session id.
+    // Spy (not module mock) so nothing leaks into other files: a forge that
+    // only needs getPrReadiness for the review babysit path, and a no-op spawn.
+    vi.spyOn(forges, 'forgeForRepo').mockReturnValue({
+      forge: { getPrReadiness: async () => readiness },
+      config: {}
+    } as unknown as ReturnType<typeof forges.forgeForRepo>)
     spawnSpy = vi.spyOn(sessionManager, 'spawn').mockReturnValue(999)
   })
   afterEach(() => {
-    spawnSpy.mockRestore()
+    vi.restoreAllMocks()
     closeDb()
     rmSync(repoDir, { recursive: true, force: true })
   })
@@ -113,7 +116,7 @@ describe('address-comments loop prevention', () => {
 
     // Reviewer leaves an additional comment (a new unresolved thread) on the
     // SAME commit → one fresh round.
-    h.readiness = { ...h.readiness, unresolvedThreads: 1 }
+    readiness = { ...readiness, unresolvedThreads: 1 }
     await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
     expect(spawnSpy).toHaveBeenCalledTimes(2)
 
@@ -137,7 +140,7 @@ describe('address-comments loop prevention', () => {
 
   it('does not spawn at all when there is no feedback', async () => {
     const id = seedReviewTask()
-    h.readiness = { ...h.readiness, changesRequested: false, unresolvedThreads: 0 }
+    readiness = { ...readiness, changesRequested: false, unresolvedThreads: 0 }
     await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
     expect(spawnSpy).not.toHaveBeenCalled()
   })
