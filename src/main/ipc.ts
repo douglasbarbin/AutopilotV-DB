@@ -355,7 +355,9 @@ export function registerIpc(): void {
 
   handle(Channels.repoSetRunbook, async (repoId: number, runbook: string) => {
     store.setRepoRunbook(repoId, runbook)
-    store.recordEvent('repo.runbook_set', { repoId, bytes: runbook.length })
+    // A runbook edit must make already-failed commits verifiable again.
+    const cleared = store.clearVerifiedShaForRepo(repoId)
+    store.recordEvent('repo.runbook_set', { repoId, bytes: runbook.length, verifiedShaCleared: cleared })
     pushState()
   })
 

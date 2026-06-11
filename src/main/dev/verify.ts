@@ -124,6 +124,8 @@ export interface MergeVerificationResult {
   ok: boolean
   /** Present only when a fresh command verification ran and failed. */
   failureSummary?: string
+  /** Pipeline stage that failed ('secrets' is operator-fixable, not agent-fixable). */
+  failureStage?: string
 }
 
 /**
@@ -159,10 +161,10 @@ export async function verifyTaskForMerge(
   // the merge gate skips the full pipeline when the draft checkpoint already
   // proved this exact SHA.
   let gate: MergeVerificationResult
-  const { runPipeline, hasRunbookStages } = await import('./pipeline')
+  const { runPipeline, hasRunbookStages, verdictIsCurrent } = await import('./pipeline')
   if (hasRunbookStages(repo)) {
     const draftPass = store.getPipelineVerdict(task.id, 'draft', sha)
-    if (draftPass?.status === 'pass') {
+    if (draftPass?.status === 'pass' && verdictIsCurrent(repo, draftPass)) {
       store.insertVerification({
         taskId: task.id,
         prNumber: task.prNumber,
@@ -176,7 +178,7 @@ export async function verifyTaskForMerge(
       gate = { ok: true }
     } else {
       const r = await runPipeline(task, repo, worktree, settings, 'merge_gate', sha)
-      gate = { ok: r.ok, failureSummary: r.failureSummary }
+      gate = { ok: r.ok, failureSummary: r.failureSummary, failureStage: r.failedStage }
     }
   } else {
     const cmd = await runCommandVerification(repo, worktree, settings)

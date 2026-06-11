@@ -45,6 +45,23 @@ export interface PipelineRun {
   ok: boolean
   ranStages: string[]
   failureSummary?: string
+  /** Stage that produced the gating failure (callers treat 'secrets' specially:
+   *  an agent can't fix a locked secrets manager — notify and hold instead). */
+  failedStage?: string
+}
+
+/** Revision stamp of the repo's resolved runbook. Stored on pipeline rollups
+ *  so a runbook edit invalidates stale verdicts for the same commit. */
+export function runbookRev(repo: Repo): string {
+  const resolved = resolveRunbook(repo)
+  return sha1(`${resolved.source}\n${resolved.narrative}\n${JSON.stringify(resolved.runbook)}`)
+}
+
+/** A rollup verdict counts only when produced under the CURRENT runbook. */
+export function verdictIsCurrent(repo: Repo, verdict: TaskVerification | null): boolean {
+  if (!verdict) return false
+  const rev = (verdict.detail as { runbookRev?: string }).runbookRev
+  return rev === runbookRev(repo)
 }
 
 interface StageOutcome {
@@ -431,7 +448,7 @@ export async function runPipeline(
     summary: stagesOk
       ? `pipeline passed at ${checkpoint} (${[...new Set(ran)].join(' → ') || 'no stages'})`
       : `pipeline failed at ${checkpoint}: ${failure!.stage} — ${failure!.summary}`,
-    detail: { stages: ran, source: resolved.source }
+    detail: { stages: ran, source: resolved.source, runbookRev: runbookRev(repo) }
   })
 
   if (!stagesOk) {
@@ -443,6 +460,7 @@ export async function runPipeline(
     return {
       ok: false,
       ranStages: ran,
+      failedStage: failure!.stage,
       failureSummary: `[${failure!.stage}] ${failure!.summary}\n\n${failure!.output.slice(-2000)}`
     }
   }

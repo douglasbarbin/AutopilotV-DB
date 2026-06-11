@@ -167,6 +167,15 @@ export function setTaskVerifiedSha(id: number, sha: string): void {
   getDb().prepare('UPDATE tasks SET verified_sha = ? WHERE id = ?').run(sha, id)
 }
 
+/** Clear the verified-SHA cache for a repo's in-flight tasks — a runbook edit
+ *  must make the same commit verifiable again. */
+export function clearVerifiedShaForRepo(repoId: number): number {
+  const info = getDb()
+    .prepare("UPDATE tasks SET verified_sha = '' WHERE repo_id = ? AND phase NOT IN ('done')")
+    .run(repoId)
+  return info.changes
+}
+
 /**
  * Record the PR head commit AND unresolved-thread count at which review feedback
  * was last addressed. Together they gate re-spawning: a sticky "changes

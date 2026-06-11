@@ -173,6 +173,51 @@ export async function advanceRevising(task: TrackerTask, settings: Settings): Pr
 }
 
 /**
+ * Spawn a verification-fix session only when an agent can plausibly help:
+ *  - never for the secrets stage (a locked secrets manager / broken runbook
+ *    is the operator's to fix; the pipeline already sent a notification);
+ *  - at most ONCE per commit — a fix session that ended without producing a
+ *    new commit didn't fix anything, and respawning on the same SHA loops
+ *    forever burning sessions.
+ */
+async function maybeSpawnVerificationFix(
+  task: TrackerTask,
+  repo: Repo,
+  worktree: { path: string; id: number } | null,
+  verdict: { failureSummary?: string; failureStage?: string }
+): Promise<void> {
+  if (verdict.failureStage === 'secrets') {
+    note(
+      'dev',
+      `${task.issueKey}: verification is blocked on the SECRETS stage — fix the runbook or unlock the secrets manager, then Refresh secrets. Not spawning an agent (it can't fix that).`,
+      { key: task.issueKey },
+      'warn'
+    )
+    return
+  }
+  const { currentSha } = await import('./verify')
+  const sha = worktree ? await currentSha(worktree.path) : ''
+  const spawnKey = `fixspawned:${task.id}:${sha}`
+  if (sha && store.kvRead(spawnKey)) {
+    note(
+      'dev',
+      `${task.issueKey}: a fix session already ran for commit ${sha.slice(0, 7)} without resolving verification — holding for a human or a new commit.`,
+      { key: task.issueKey },
+      'warn'
+    )
+    return
+  }
+  if (sha) store.kvWrite(spawnKey, new Date().toISOString())
+  await startVerificationFix(task, repo, worktree, verdict.failureSummary ?? 'Verification failed.')
+  notifier.notify({
+    kind: 'needs_human',
+    title: `Verification failed — ${task.issueKey}`,
+    body: `PR #${task.prNumber} failed verification. Auto-fixing.`,
+    deepLink: { type: 'task', id: task.id }
+  })
+}
+
+/**
  * Draft checkpoint: as soon as a draft PR exists, prove the change RUNNABLE
  * with the full runbook pipeline (setup → secrets → build → test → app+e2e)
  * before a human looks at it. A failure spawns a verification-fix session and
@@ -188,7 +233,7 @@ async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promis
   const worktree = store.getWorktree(task.worktreeId)
   if (!repo || !worktree || worktree.prunedAt) return true
 
-  const { hasRunbookStages, runPipeline } = await import('./pipeline')
+  const { hasRunbookStages, runPipeline, verdictIsCurrent } = await import('./pipeline')
   if (!hasRunbookStages(repo)) return true
 
   // A verification-fix session signals completion with the address-comments
@@ -204,8 +249,10 @@ async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promis
   const sha = await currentSha(worktree.path)
   if (!sha) return true
 
+  // A verdict only stands while the runbook is unchanged — editing the
+  // runbook invalidates it so the same commit gets re-verified.
   const existing = store.getPipelineVerdict(task.id, 'draft', sha)
-  if (existing) {
+  if (existing && verdictIsCurrent(repo, existing)) {
     // 'error' rollups (e.g. invalid runbook) surface but never block.
     return existing.status !== 'fail'
   }
@@ -217,12 +264,9 @@ async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promis
     })
     return true
   }
-  await startVerificationFix(task, repo, worktree, r.failureSummary ?? 'Pipeline failed.')
-  notifier.notify({
-    kind: 'needs_human',
-    title: `Draft verification failed — ${task.issueKey}`,
-    body: `PR #${task.prNumber} failed the runbook pipeline at draft. Auto-fixing.`,
-    deepLink: { type: 'task', id: task.id }
+  await maybeSpawnVerificationFix(task, repo, worktree, {
+    failureSummary: r.failureSummary,
+    failureStage: r.failedStage
   })
   return false
 }
@@ -324,13 +368,7 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
         const verdict = await verifyTaskForMerge(task, settings)
         if (!verdict.ok) {
           if (!isTaskSessionActive(task)) {
-            await startVerificationFix(task, repo, worktree, verdict.failureSummary ?? 'Verification failed.')
-            notifier.notify({
-              kind: 'needs_human',
-              title: `Verification failed — ${task.issueKey}`,
-              body: `PR #${task.prNumber} passed review gates but failed verification. Auto-fixing.`,
-              deepLink: { type: 'task', id: task.id }
-            })
+            await maybeSpawnVerificationFix(task, repo, worktree, verdict)
           }
           return
         }
