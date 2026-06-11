@@ -106,6 +106,11 @@ export class Brain extends EventEmitter {
       await this.reconcileSessions()
       await this.scheduleWork()
       await advanceDevTasks(store.getSettings())
+      // Learning-loop hygiene: at most once a day, merge/retire knowledge so
+      // the injected AGENTS.md section stays sharp. Lazy import to keep test
+      // module graphs light (same rationale as dev/phases' verify import).
+      const { maybeConsolidateKnowledge } = await import('../analysis/consolidate')
+      await maybeConsolidateKnowledge(store.getSettings())
     } catch (err) {
       log.error('tick failed', { err: String(err) })
       store.recordEvent('tick.error', { err: String(err) }, { level: 'error' })

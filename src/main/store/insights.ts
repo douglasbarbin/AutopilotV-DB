@@ -261,3 +261,33 @@ export function markKnowledgeApplied(ids: number[]): void {
   )
   for (const id of ids) stmt.run(id)
 }
+
+/** Learning-loop aggregates for the metrics scorecard. */
+export function insightsTotals(): {
+  followupsCandidate: number
+  followupsCreated: number
+  followupsDismissed: number
+  knowledgeCandidate: number
+  knowledgeActive: number
+  knowledgeRetired: number
+  knowledgeApplications: number
+} {
+  const db = getDb()
+  const f = db
+    .prepare(`SELECT status, COUNT(*) AS n FROM followups GROUP BY status`)
+    .all() as { status: string; n: number }[]
+  const k = db
+    .prepare(`SELECT status, COUNT(*) AS n FROM knowledge GROUP BY status`)
+    .all() as { status: string; n: number }[]
+  const apps = db.prepare(`SELECT COALESCE(SUM(hit_count), 0) AS n FROM knowledge`).get() as { n: number }
+  const by = (rows: { status: string; n: number }[], s: string) => rows.find((r) => r.status === s)?.n ?? 0
+  return {
+    followupsCandidate: by(f, 'candidate'),
+    followupsCreated: by(f, 'created'),
+    followupsDismissed: by(f, 'dismissed'),
+    knowledgeCandidate: by(k, 'candidate'),
+    knowledgeActive: by(k, 'active'),
+    knowledgeRetired: by(k, 'retired'),
+    knowledgeApplications: apps.n
+  }
+}

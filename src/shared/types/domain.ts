@@ -370,11 +370,24 @@ export interface ReviewStats {
   humanApproveRate: number | null
 }
 
+/** Learning-loop health: how much the PM/knowledge flywheel is actually turning. */
+export interface InsightsStats {
+  followupsCandidate: number
+  followupsCreated: number
+  followupsDismissed: number
+  knowledgeCandidate: number
+  knowledgeActive: number
+  knowledgeRetired: number
+  /** Total times active knowledge has been injected into a session's AGENTS.md. */
+  knowledgeApplications: number
+}
+
 export interface MetricsSnapshot {
   generatedAt: string
   harnesses: HarnessScorecard[]
   dev: DevThroughput
   review: ReviewStats
+  insights: InsightsStats
 }
 
 // The full snapshot pushed to the renderer.

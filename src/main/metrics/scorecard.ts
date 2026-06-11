@@ -8,6 +8,7 @@ import * as store from '../store'
 import type {
   DevThroughput,
   HarnessScorecard,
+  InsightsStats,
   MetricsSnapshot,
   ReviewStats
 } from '@shared/types/domain'
@@ -151,11 +152,16 @@ function buildReviewStats(): ReviewStats {
   }
 }
 
+function buildInsightsStats(): InsightsStats {
+  return store.insightsTotals()
+}
+
 export function computeMetrics(): MetricsSnapshot {
   return {
     generatedAt: new Date().toISOString(),
     harnesses: buildHarnessScorecards(),
     dev: buildDevThroughput(),
-    review: buildReviewStats()
+    review: buildReviewStats(),
+    insights: buildInsightsStats()
   }
 }

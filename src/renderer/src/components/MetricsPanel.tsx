@@ -38,7 +38,7 @@ export function MetricsPanel() {
     return <div className="empty">Crunching the numbers…</div>
   }
 
-  const { dev, review, harnesses } = metrics
+  const { dev, review, harnesses, insights } = metrics
 
   return (
     <div className="metrics-panel">
@@ -72,6 +72,25 @@ export function MetricsPanel() {
                   .join(' · ')
               : '—'
           }
+        />
+      </div>
+
+      <h3 className="metrics-section">Learning loop</h3>
+      <div className="metric-cards">
+        <Stat
+          label="Follow-ups harvested"
+          value={`${insights.followupsCandidate + insights.followupsCreated + insights.followupsDismissed}`}
+          sub={`${insights.followupsCandidate} pending · ${insights.followupsCreated} became stories · ${insights.followupsDismissed} dismissed`}
+        />
+        <Stat
+          label="Knowledge base"
+          value={`${insights.knowledgeActive} active`}
+          sub={`${insights.knowledgeCandidate} candidate · ${insights.knowledgeRetired} retired`}
+        />
+        <Stat
+          label="Knowledge applications"
+          value={`${insights.knowledgeApplications}`}
+          sub="times learned conventions were injected into a session"
         />
       </div>
 

@@ -94,7 +94,8 @@ export {
   listKnowledge,
   setKnowledgeStatus,
   selectKnowledgeForInjection,
-  markKnowledgeApplied
+  markKnowledgeApplied,
+  insightsTotals
 } from './insights'
 
 export * as metrics from './metrics'
