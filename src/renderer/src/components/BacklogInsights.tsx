@@ -24,7 +24,12 @@ const CONF_COLOR: Record<string, string> = {
  */
 export function BacklogInsights({ state }: { state: AppState }) {
   const candidates = state.followups.filter((f) => f.status === 'candidate')
-  const created = state.followups.filter((f) => f.status === 'created').slice(0, 10)
+  // Display window only — created rows are kept forever in the DB because the
+  // semantic dedupe uses them to suppress re-suggestions of shipped stories.
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+  const created = state.followups
+    .filter((f) => f.status === 'created' && Date.parse(f.updatedAt.replace(' ', 'T') + 'Z') > weekAgo)
+    .slice(0, 10)
   const candidateKnowledge = state.knowledge.filter((k) => k.status === 'candidate')
   const activeKnowledge = state.knowledge.filter((k) => k.status === 'active')
 
@@ -58,7 +63,7 @@ export function BacklogInsights({ state }: { state: AppState }) {
         </div>
         {created.length > 0 && (
           <div className="muted-list">
-            <h3 className="section-sub">Recently created stories</h3>
+            <h3 className="section-sub">Recently created stories (last 7 days)</h3>
             <ul className="findings">
               {created.map((f) => (
                 <li key={f.id}>
