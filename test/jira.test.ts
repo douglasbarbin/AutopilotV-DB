@@ -3,7 +3,7 @@ import { vi, describe, it, expect, beforeEach } from 'vitest'
 const { execMock } = vi.hoisted(() => ({ execMock: vi.fn() }))
 vi.mock('../src/main/util/exec', () => ({ exec: execMock, execOrThrow: vi.fn() }))
 
-import { jiraTracker } from '../src/main/trackers/jira'
+import { jiraTracker, parseAllowedTypes, pickIssueType } from '../src/main/trackers/jira'
 
 describe('jiraTracker.transition', () => {
   beforeEach(() => execMock.mockReset())
@@ -77,5 +77,65 @@ describe('jiraTracker.createIssue', () => {
   it('throws when no key can be found', async () => {
     execMock.mockResolvedValue({ stdout: 'something went sideways', stderr: '', code: 0 })
     await expect(jiraTracker.createIssue!(draft, {})).rejects.toThrow(/no issue key/)
+  })
+
+  it('retries with a project-allowed type when Jira rejects the preferred one', async () => {
+    // The exact TXRI rejection: the project has Story but no Task.
+    execMock
+      .mockResolvedValueOnce({
+        stdout: '',
+        stderr:
+          'Please provide valid issue type . Allowed issue types for project are : Story, Bug, Epic, Sub-task, Initiative',
+        code: 1
+      })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ key: 'TXRI-901' }), stderr: '', code: 0 })
+
+    const created = await jiraTracker.createIssue!(draft, {})
+    expect(created.key).toBe('TXRI-901')
+    const [, firstArgs] = execMock.mock.calls[0]
+    const [, retryArgs] = execMock.mock.calls[1]
+    expect(firstArgs[firstArgs.indexOf('--type') + 1]).toBe('Task')
+    expect(retryArgs[retryArgs.indexOf('--type') + 1]).toBe('Story')
+  })
+
+  it('retries bug follow-ups with Bug when the project offers it', async () => {
+    execMock
+      .mockResolvedValueOnce({
+        stdout: '',
+        stderr: 'Please provide valid issue type . Allowed issue types for project are : Story, Bug, Epic',
+        code: 1
+      })
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ key: 'TXRI-902' }), stderr: '', code: 0 })
+    // A bug follow-up that first tried 'Bug'... preferred for bug IS Bug, so simulate
+    // a project where Bug itself is rejected and Story is the fallback.
+    await jiraTracker.createIssue!({ ...draft, kind: 'todo' }, {})
+    const [, retryArgs] = execMock.mock.calls[1]
+    expect(retryArgs[retryArgs.indexOf('--type') + 1]).toBe('Story')
+  })
+
+  it('gives up with the original error when no allowed type fits', async () => {
+    execMock.mockResolvedValue({
+      stdout: '',
+      stderr: 'Please provide valid issue type . Allowed issue types for project are : Epic, Initiative',
+      code: 1
+    })
+    await expect(jiraTracker.createIssue!(draft, {})).rejects.toThrow(/acli create failed/)
+    expect(execMock).toHaveBeenCalledTimes(1) // no useful fallback → no retry
+  })
+})
+
+describe('parseAllowedTypes / pickIssueType', () => {
+  it('parses the allowed list out of the rejection text', () => {
+    expect(
+      parseAllowedTypes(
+        'Please provide valid issue type . Allowed issue types for project are : Story, Bug, Epic, Sub-task, Initiative'
+      )
+    ).toEqual(['Story', 'Bug', 'Epic', 'Sub-task', 'Initiative'])
+    expect(parseAllowedTypes('some unrelated error')).toEqual([])
+  })
+
+  it('never auto-picks container or child types', () => {
+    expect(pickIssueType('todo', ['Epic', 'Sub-task', 'Initiative'], 'Task')).toBeNull()
+    expect(pickIssueType('todo', ['Epic', 'Improvement'], 'Task')).toBe('Improvement')
   })
 })

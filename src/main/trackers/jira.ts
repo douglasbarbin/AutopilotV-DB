@@ -88,26 +88,41 @@ export const jiraTracker: ProjectTracker = {
   },
 
   async createIssue(draft: IssueDraft): Promise<{ key: string; url?: string }> {
-    const type = draft.kind === 'bug' ? 'Bug' : 'Task'
-    log.info('creating jira issue', { project: draft.projectKey, type })
-    const r = await exec(
-      'acli',
-      [
-        'jira',
-        'workitem',
-        'create',
-        '--project',
-        draft.projectKey,
-        '--type',
-        type,
-        '--summary',
-        draft.title,
-        '--description',
-        draft.description || draft.title,
-        '--json'
-      ],
-      { timeoutMs: 30_000 }
-    )
+    const create = (type: string) =>
+      exec(
+        'acli',
+        [
+          'jira',
+          'workitem',
+          'create',
+          '--project',
+          draft.projectKey,
+          '--type',
+          type,
+          '--summary',
+          draft.title,
+          '--description',
+          draft.description || draft.title,
+          '--json'
+        ],
+        { timeoutMs: 30_000 }
+      )
+
+    const preferred = draft.kind === 'bug' ? 'Bug' : 'Task'
+    log.info('creating jira issue', { project: draft.projectKey, type: preferred })
+    let r = await create(preferred)
+
+    // Issue types are per-project (e.g. a project with Story but no Task).
+    // Jira's rejection lists what IS allowed — parse it and retry once with
+    // the best fit rather than failing the human's click.
+    if (r.code !== 0) {
+      const allowed = parseAllowedTypes(`${r.stderr}\n${r.stdout}`)
+      const fallback = pickIssueType(draft.kind, allowed, preferred)
+      if (fallback) {
+        log.info('retrying jira create with project-allowed type', { project: draft.projectKey, type: fallback })
+        r = await create(fallback)
+      }
+    }
     if (r.code !== 0) throw new Error(`acli create failed: ${(r.stderr || r.stdout).slice(0, 200)}`)
     // acli output shapes vary by version; pull the key defensively.
     let key = ''
@@ -124,4 +139,32 @@ export const jiraTracker: ProjectTracker = {
     if (!key) throw new Error(`acli create returned no issue key: ${r.stdout.slice(0, 200)}`)
     return { key, url }
   }
+}
+
+/** Pull the allowed-type list out of Jira's "Please provide valid issue type"
+ *  rejection. Returns [] when the error is something else. */
+export function parseAllowedTypes(text: string): string[] {
+  const m = text.match(/allowed issue types[^:]*:\s*([^\n]+)/i)
+  if (!m) return []
+  return m[1]
+    .split(',')
+    .map((s) => s.trim().replace(/[.\s]+$/, ''))
+    .filter(Boolean)
+}
+
+/** Best project-allowed type for a follow-up kind: Bug for bugs when offered,
+ *  then Story, then Task; never auto-pick container/child types. */
+export function pickIssueType(kind: string, allowed: string[], exclude: string): string | null {
+  const find = (name: string) =>
+    allowed.find((a) => a.toLowerCase() === name.toLowerCase() && a.toLowerCase() !== exclude.toLowerCase())
+  if (kind === 'bug') {
+    const bug = find('Bug')
+    if (bug) return bug
+  }
+  for (const candidate of ['Story', 'Task']) {
+    const got = find(candidate)
+    if (got) return got
+  }
+  const avoid = new Set(['epic', 'sub-task', 'subtask', 'initiative', exclude.toLowerCase()])
+  return allowed.find((a) => !avoid.has(a.toLowerCase())) ?? null
 }
