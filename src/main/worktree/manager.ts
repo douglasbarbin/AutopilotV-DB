@@ -86,12 +86,14 @@ export async function writeRunbookOverride(worktreePath: string, repo: Repo): Pr
     const { resolveRunbook, RUNBOOK_FILENAME } = await import('../runbook/runbook')
     const resolved = resolveRunbook(repo)
     if (resolved.source !== 'override' || !resolved.narrative) return
-    // Same rule as AGENTS.md: never write over a committed RUNBOOK.md — local
-    // changes to tracked files block agent-initiated merges. The override gets
-    // a git-excluded companion name instead.
-    const target = existsSync(join(worktreePath, RUNBOOK_FILENAME)) ? 'RUNBOOK.autopilotv.md' : RUNBOOK_FILENAME
-    writeFileSync(join(worktreePath, target), resolved.narrative)
-    await addToGitExclude(worktreePath, [target])
+    // The executable stages live in the DB and only the orchestrator runs
+    // them; materialization exists solely so agents can read the narrative
+    // ("how to run this repo"). A repo with its own committed RUNBOOK.md
+    // already gives agents that — write nothing (never over a tracked file:
+    // dirty tracked files block agent-initiated merges).
+    if (existsSync(join(worktreePath, RUNBOOK_FILENAME))) return
+    writeFileSync(join(worktreePath, RUNBOOK_FILENAME), resolved.narrative)
+    await addToGitExclude(worktreePath, [RUNBOOK_FILENAME])
   } catch (err) {
     log.warn('failed to write runbook override', { err: String(err) })
   }

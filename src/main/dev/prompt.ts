@@ -99,7 +99,7 @@ export function buildDevStartPrompt(input: DevStartPromptInput): string {
     '',
     AGENTS_MERGE_UNBLOCK,
     '',
-    'If a RUNBOOK.md (or RUNBOOK.autopilotv.md — the operator override, which wins) exists in the worktree root, read it before building, running, or testing — it explains how to get THIS repo to a runnable state (setup, secrets, app startup). Never run secrets-manager commands (e.g. `op`) yourself; the orchestrator materializes any required config files before you start.',
+    'If a RUNBOOK.md exists in the worktree root, read it before building, running, or testing — it explains how to get THIS repo to a runnable state (setup, secrets, app startup). Never run secrets-manager commands (e.g. `op`) yourself; the orchestrator materializes any required config files before you start.',
     '',
     `Implement the change on \`${branch}\`, commit, and open a DRAFT pull request against \`${baseBranch}\` with:`,
     '',
