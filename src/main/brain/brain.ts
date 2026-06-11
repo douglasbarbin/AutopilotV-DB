@@ -5,7 +5,7 @@ import { log } from '../log'
 import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
 import { autoDriveSession } from './autodrive'
-import { harvestReviews, startReview } from '../review/orchestrator'
+import { harvestReviews, reconcileExternallyResolvedReviews, startReview } from '../review/orchestrator'
 import { startDevTask, advanceDevTasks, resetDevTask } from '../dev/orchestrator'
 import { gcOrphanedWorktrees } from '../worktree/manager'
 import { makeProvider } from '../llm/provider'
@@ -126,6 +126,7 @@ export class Brain extends EventEmitter {
       const { forge, config: forgeConfig } = activeForge(settings)
       let prs: ForgePr[]
       let detail: string
+      const erroredRepos = new Set<string>()
       if (settings.watchRepos.length > 0) {
         const { prs: found, errors } = await forge.listReviewRequestedPrsForRepos(
           settings.watchRepos,
@@ -136,6 +137,7 @@ export class Brain extends EventEmitter {
         detail = `${prs.length} across ${settings.watchRepos.length} repo(s)${
           errors.length ? `, ${errors.length} repo error(s)` : ''
         }`
+        for (const e of errors) erroredRepos.add(e.repo)
         if (errors.length) {
           this.reason(
             'refresh',
@@ -151,8 +153,10 @@ export class Brain extends EventEmitter {
         detail = `${prs.length} via search filter`
       }
       let reRequested = 0
+      const stillRequested = new Set<string>()
       for (const pr of prs) {
         const repo = this.ensureRepo(pr.repoNameWithOwner, forge.id)
+        stillRequested.add(`${repo.id}:${pr.number}`)
         const { reRequested: didReRequest } = store.upsertPrReview({
           prNumber: pr.number,
           repoId: repo.id,
@@ -169,6 +173,17 @@ export class Brain extends EventEmitter {
             { prNumber: pr.number }
           )
         }
+      }
+
+      // Review-lane reconciliation: a queued/in-flight review whose PR merged
+      // or closed externally has no branch left to review — supersede it.
+      const superseded = await reconcileExternallyResolvedReviews(stillRequested, erroredRepos)
+      for (const s of superseded) {
+        this.reason(
+          'reconcile',
+          `PR #${s.prNumber} "${s.title}" was ${s.reason} before my review was used — skipped and cleaned up.`,
+          { prNumber: s.prNumber, reason: s.reason }
+        )
       }
       this.setHealth({ name: 'forge', status: 'ok', detail: `[${forge.id}] ${detail}` })
       this.reason(

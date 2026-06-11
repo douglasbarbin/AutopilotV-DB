@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { detectStall, violatesDenylist } from '../src/main/brain/stall'
+import { normalizeTerminalText } from '../src/main/util/ansi'
 import type { HarnessConfig } from '@shared/types/domain'
 
 const harness: HarnessConfig = {
@@ -36,6 +37,32 @@ describe('detectStall', () => {
   it('ignores invalid regex patterns without throwing', () => {
     const bad = { ...harness, stall: { idleSeconds: 30, waitingPatterns: ['([invalid'] } }
     expect(() => detectStall(bad, 5, 'x')).not.toThrow()
+  })
+
+  it('matches a waiting prompt interleaved with ANSI color codes', () => {
+    const tail = 'Apply changes? \x1b[1m\x1b[32m(y\x1b[0m/\x1b[31mn)\x1b[0m '
+    const s = detectStall(harness, 1, tail)
+    expect(s.isCandidate).toBe(true)
+    expect(s.reason).toBe('waiting_pattern')
+  })
+
+  it('matches a prompt repainted over a spinner line with carriage returns', () => {
+    const tail = '⠋ thinking…\r⠙ thinking…\rContinue? (y/n) '
+    const s = detectStall(harness, 1, tail)
+    expect(s.isCandidate).toBe(true)
+    expect(s.reason).toBe('waiting_pattern')
+  })
+})
+
+describe('normalizeTerminalText', () => {
+  it('strips CSI and OSC sequences', () => {
+    const raw = '\x1b]0;title\x07\x1b[2J\x1b[1;32mhello\x1b[0m world'
+    expect(normalizeTerminalText(raw)).toBe('hello world')
+  })
+
+  it('keeps only the visible segment after carriage-return repaints', () => {
+    expect(normalizeTerminalText('10%\r50%\r100% done')).toBe('100% done')
+    expect(normalizeTerminalText('line1\nspin\rfinal\nline3')).toBe('line1\nfinal\nline3')
   })
 })
 

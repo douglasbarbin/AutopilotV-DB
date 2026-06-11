@@ -5,6 +5,7 @@ import { detectStall, violatesDenylist, resolveInjection } from './stall'
 import { tickState } from './tickState'
 import { notifier } from '../notify'
 import { judgeValidated, StallDecisionSchema, type LlmProvider, type StallDecision } from '../llm/provider'
+import { HARNESS_BOOT_TIMEOUT_SECONDS } from '../sessions/kickoff'
 import type { Session, Settings } from '@shared/types/domain'
 
 function secondsSince(iso: string | null): number {
@@ -30,6 +31,31 @@ export async function autoDriveSession(
 
   const harness = store.getHarness(session.harnessId)
   if (!harness) return
+
+  // Boot watchdog: a session that has NEVER produced output is still booting —
+  // judging its empty terminal is meaningless (and secondsSince(null) would
+  // otherwise flag it as an instant idle stall). Give it a boot window; if the
+  // window closes with the terminal still blank, the harness never started and
+  // the session is dead weight — kill it so the owning lane errors visibly.
+  if (!session.lastOutputAt) {
+    if (secondsSince(session.startedAt) > HARNESS_BOOT_TIMEOUT_SECONDS) {
+      log.warn('session produced no output within the boot window; killing', { sessionId: session.id })
+      store.recordEvent(
+        'session.boot_timeout',
+        { sessionId: session.id, timeoutSeconds: HARNESS_BOOT_TIMEOUT_SECONDS },
+        { level: 'warn', sessionId: session.id }
+      )
+      store.recordBrainNote({
+        tick: tickState.current,
+        category: 'autodrive',
+        message: `"${session.title}" never produced any output — the harness likely failed to launch. Killed it.`,
+        detail: { sessionId: session.id },
+        level: 'warn'
+      })
+      sessionManager.kill(session.id, 'boot timeout: no output')
+    }
+    return
+  }
 
   const tail = sessionManager.getTail(session.id)
   const signal = detectStall(harness, secondsSince(session.lastOutputAt), tail)

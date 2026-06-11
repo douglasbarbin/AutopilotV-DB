@@ -68,7 +68,7 @@ export function App() {
   ).length
   const enabledProjects = new Set(state.trackerProjects.filter((p) => p.enabled).map((p) => p.key))
   const workCount =
-    state.prReviews.filter((p) => !['submitted', 'dismissed', 'pruned'].includes(p.state)).length +
+    state.prReviews.filter((p) => !['submitted', 'dismissed', 'pruned', 'superseded'].includes(p.state)).length +
     state.tasks.filter((t) => t.status !== 'done' && enabledProjects.has(t.projectKey)).length
 
   const badges: Partial<Record<Tab, number>> = {

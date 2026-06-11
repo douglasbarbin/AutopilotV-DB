@@ -20,6 +20,8 @@ export type PrReviewState =
   | 'submitted'
   | 'dismissed'
   | 'pruned'
+  /** The PR merged or closed externally before our review was acted on. */
+  | 'superseded'
   | 'error'
 
 export type ReviewAction = 'approve' | 'request_changes' | 'comment' | 'dismiss'

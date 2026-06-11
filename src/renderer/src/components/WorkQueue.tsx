@@ -13,7 +13,7 @@ const VERIFY_COLOR: Record<TaskVerification['status'], string> = {
 
 export function WorkQueue({ state }: { state: AppState }) {
   const openReviews = state.prReviews.filter(
-    (p) => !['submitted', 'dismissed', 'pruned'].includes(p.state)
+    (p) => !['submitted', 'dismissed', 'pruned', 'superseded'].includes(p.state)
   )
   const enabled = new Set(state.trackerProjects.filter((p) => p.enabled).map((p) => p.key))
   const openTasks = state.tasks.filter(

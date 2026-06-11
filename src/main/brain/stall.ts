@@ -1,5 +1,6 @@
 import type { HarnessConfig } from '@shared/types/domain'
 import type { StallDecision } from '../llm/provider'
+import { normalizeTerminalText } from '../util/ansi'
 
 export interface StallSignal {
   isCandidate: boolean
@@ -10,16 +11,19 @@ export interface StallSignal {
 /**
  * Pure stall detection: given a harness config, the seconds since last output,
  * and the recent stdout tail, decide whether the session looks stalled.
+ * Patterns are matched against the ANSI-stripped visible text — a "Press enter"
+ * broken up by color codes or repainted over a spinner line still matches.
  */
 export function detectStall(
   harness: HarnessConfig,
   secondsSinceOutput: number,
   tail: string
 ): StallSignal {
+  const visible = normalizeTerminalText(tail)
   for (const pat of harness.stall.waitingPatterns) {
     try {
       const re = new RegExp(pat, 'i')
-      if (re.test(tail)) return { isCandidate: true, reason: 'waiting_pattern', matchedPattern: pat }
+      if (re.test(visible)) return { isCandidate: true, reason: 'waiting_pattern', matchedPattern: pat }
     } catch {
       /* skip invalid pattern */
     }

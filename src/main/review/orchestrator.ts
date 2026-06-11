@@ -8,9 +8,17 @@ import { buildReviewSandbox } from '../worktree/sandbox'
 import { forgeForRepo } from '../forges'
 import { notifier } from '../notify'
 import { ReviewResultSchema } from '../llm/provider'
-import type { PrReview, ReviewAction } from '@shared/types/domain'
+import type { PrReview, PrReviewState, ReviewAction } from '@shared/types/domain'
 
 const REVIEW_FILE = '.review.json'
+
+/** States in which a pr_review still expects something to happen to the PR. */
+const OPEN_REVIEW_STATES: PrReviewState[] = [
+  'discovered',
+  'provisioning',
+  'review_in_progress',
+  'awaiting_user'
+]
 
 /**
  * Begin reviewing a PR: provision an isolated, sandboxed worktree and spawn the
@@ -168,6 +176,65 @@ async function captureReview(
 }
 
 /**
+ * Tear down a review whose PR was resolved externally (merged or closed before
+ * our review was used): kill any in-flight session, prune the worktree, and
+ * mark the row superseded so it leaves the queue without a human action.
+ */
+export async function supersedeReview(pr: PrReview, reason: string): Promise<void> {
+  if (pr.sessionId) {
+    const sess = store.getSession(pr.sessionId)
+    if (sess) {
+      if (sessionManager.isLive(sess.id)) sessionManager.kill(sess.id, `superseded: ${reason}`)
+      if (sess.worktreeId) {
+        const wt = store.getWorktree(sess.worktreeId)
+        if (wt && !wt.prunedAt) await pruneWorktree(wt)
+      }
+    }
+  }
+  store.setPrReviewState(pr.id, 'superseded')
+  store.setClaimState('review', pr.id, 'done')
+  store.recordEvent('review.superseded', { prReviewId: pr.id, prNumber: pr.prNumber, reason })
+}
+
+/**
+ * Reconcile the review lane against the forge: any pr_review still expecting
+ * action whose PR has merged or closed externally is superseded — there is no
+ * branch left to review. Absence from the review-requested list is only the
+ * TRIGGER for a check; the per-PR state lookup is what's authoritative, so a
+ * withdrawn review request (PR still open) is left alone, and a repo whose
+ * discovery errored this tick is skipped entirely.
+ */
+export async function reconcileExternallyResolvedReviews(
+  stillRequested: Set<string>, // keys: `${repoId}:${prNumber}`
+  erroredRepos: Set<string> // repo names whose discovery failed this tick
+): Promise<{ prNumber: number; title: string; reason: string }[]> {
+  const settings = store.getSettings()
+  const superseded: { prNumber: number; title: string; reason: string }[] = []
+  for (const pr of store.listPrReviews()) {
+    if (!OPEN_REVIEW_STATES.includes(pr.state)) continue
+    if (stillRequested.has(`${pr.repoId}:${pr.prNumber}`)) continue
+    const repo = store.getRepo(pr.repoId)
+    if (!repo || erroredRepos.has(repo.name)) continue
+    let adopt
+    try {
+      const { forge, config } = forgeForRepo(repo, settings)
+      adopt = await forge.getAdoptablePr(repo.name, pr.prNumber, config)
+    } catch {
+      continue // transient forge error — try again next tick rather than guess
+    }
+    if (adopt && adopt.state === 'OPEN') continue
+    const reason = !adopt
+      ? 'PR no longer exists'
+      : adopt.state === 'MERGED'
+        ? 'merged externally'
+        : 'closed externally'
+    await supersedeReview(pr, reason)
+    superseded.push({ prNumber: pr.prNumber, title: pr.title, reason })
+  }
+  return superseded
+}
+
+/**
  * Approve-only: approve the PR on the active forge with NO comment body (a
  * bare approval), regardless of whether an AI summary exists. Cleans up any
  * in-flight review session/worktree first.
@@ -178,6 +245,16 @@ export async function approveOnly(prReviewId: number): Promise<void> {
   const repo = store.getRepo(pr.repoId)
   if (!repo) throw new Error('repo missing')
   const { forge, config: forgeConfig } = forgeForRepo(repo, store.getSettings())
+
+  // The PR may have merged/closed since the card was rendered — supersede
+  // instead of posting a review nothing can act on. A failed check is not a
+  // veto: only a positively non-open state blocks the submission.
+  const fresh = await forge.getAdoptablePr(repo.name, pr.prNumber, forgeConfig).catch(() => undefined)
+  if (fresh && fresh.state !== 'OPEN') {
+    const why = fresh.state === 'MERGED' ? 'merged' : 'closed'
+    await supersedeReview(pr, `${why} externally`)
+    throw new Error(`PR #${pr.prNumber} was already ${why} — approval skipped`)
+  }
 
   // Tear down any in-flight review attempt for this PR.
   if (pr.sessionId) {
@@ -218,6 +295,14 @@ export async function actOnReview(reviewId: number, action: ReviewAction): Promi
     store.setPrReviewState(pr.id, 'dismissed')
     store.recordEvent('review.dismissed', { prReviewId: pr.id })
     return
+  }
+
+  // Same freshness guard as approveOnly: don't post onto a merged/closed PR.
+  const fresh = await forge.getAdoptablePr(repo.name, pr.prNumber, forgeConfig).catch(() => undefined)
+  if (fresh && fresh.state !== 'OPEN') {
+    const why = fresh.state === 'MERGED' ? 'merged' : 'closed'
+    await supersedeReview(pr, `${why} externally`)
+    throw new Error(`PR #${pr.prNumber} was already ${why} — review not submitted`)
   }
 
   await forge.submitReview(repo.name, pr.prNumber, action, review.summary, forgeConfig)
