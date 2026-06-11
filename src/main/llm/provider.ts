@@ -13,10 +13,14 @@ export const StallDecisionSchema = z.object({
   // text. nudge: the agent went quiet without finishing and isn't at a prompt
   // — push it to keep going. wait: it's still making progress, leave it alone.
   // escalate: hand off to a human.
+  //
+  // Only `action` is strict. Small local models routinely omit the metadata
+  // fields, and a missing "reason" must not invalidate an otherwise usable
+  // decision (it did — twice in a row — and escalated a healthy session).
   action: z.enum(['respond', 'press_keys', 'nudge', 'wait', 'escalate']),
-  response: z.string().nullable(),
-  keys: z.array(z.string()).nullable().optional(),
-  reason: z.string()
+  response: z.string().nullable().catch(null),
+  keys: z.array(z.string()).nullable().optional().catch(null),
+  reason: z.string().catch('')
 })
 export type StallDecision = z.infer<typeof StallDecisionSchema>
 

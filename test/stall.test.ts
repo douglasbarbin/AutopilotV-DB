@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { detectStall, resolveInjection, violatesDenylist } from '../src/main/brain/stall'
+import { detectStall, resolveInjection, shouldReengage, violatesDenylist } from '../src/main/brain/stall'
 import { normalizeTerminalText } from '../src/main/util/ansi'
+import { StallDecisionSchema } from '../src/main/llm/provider'
 import type { HarnessConfig } from '@shared/types/domain'
 
 const harness: HarnessConfig = {
@@ -91,6 +92,36 @@ describe('resolveInjection', () => {
   })
 })
 
+describe('shouldReengage', () => {
+  const base = {
+    promptDetected: true,
+    currentFingerprint: 'new-screen',
+    escalatedFingerprint: 'old-screen',
+    injectCount: 1,
+    maxInjections: 5
+  }
+
+  it('re-engages when a prompt appears on a changed screen', () => {
+    expect(shouldReengage(base)).toBe(true)
+  })
+
+  it('does not re-engage without a recognizable prompt', () => {
+    expect(shouldReengage({ ...base, promptDetected: false })).toBe(false)
+  })
+
+  it('does not re-engage on the same screen we escalated on', () => {
+    expect(shouldReengage({ ...base, currentFingerprint: 'old-screen' })).toBe(false)
+  })
+
+  it('re-engages when no escalation fingerprint was recorded', () => {
+    expect(shouldReengage({ ...base, escalatedFingerprint: null })).toBe(true)
+  })
+
+  it('does not re-engage a capped session', () => {
+    expect(shouldReengage({ ...base, injectCount: 5 })).toBe(false)
+  })
+})
+
 describe('violatesDenylist', () => {
   const denylist = ['rm -rf', 'git push --force', 'drop table']
 
@@ -104,5 +135,24 @@ describe('violatesDenylist', () => {
 
   it('allows a benign confirmation', () => {
     expect(violatesDenylist(denylist, 'y', 'Continue installing deps? (y/n)')).toBeNull()
+  })
+})
+
+describe('StallDecisionSchema tolerance', () => {
+  it('accepts a decision missing reason/response/keys (only action is strict)', () => {
+    const d = StallDecisionSchema.parse({ action: 'wait' })
+    expect(d).toMatchObject({ action: 'wait', response: null, reason: '' })
+    expect(d.keys ?? null).toBeNull()
+  })
+
+  it('salvages a decision with wrongly-typed metadata fields', () => {
+    const d = StallDecisionSchema.parse({ action: 'respond', response: 'y', keys: 'enter', reason: 42 })
+    expect(d.response).toBe('y')
+    expect(d.keys ?? null).toBeNull()
+    expect(d.reason).toBe('')
+  })
+
+  it('still rejects an invalid action', () => {
+    expect(() => StallDecisionSchema.parse({ action: 'reboot' })).toThrow()
   })
 })

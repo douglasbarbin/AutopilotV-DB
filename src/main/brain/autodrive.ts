@@ -1,7 +1,7 @@
 import { log } from '../log'
 import * as store from '../store'
 import { sessionManager } from '../sessions/manager'
-import { detectStall, violatesDenylist, resolveInjection } from './stall'
+import { detectStall, shouldReengage, violatesDenylist, resolveInjection } from './stall'
 import { tickState } from './tickState'
 import { notifier } from '../notify'
 import { judgeValidated, StallDecisionSchema, type LlmProvider, type StallDecision } from '../llm/provider'
@@ -27,10 +27,27 @@ interface InjectionMemory {
   fingerprint: string | null
   /** Consecutive interventions with no visible effect on the terminal. */
   ineffective: number
+  /** Consecutive stall-judgment LLM failures (transient outages tolerated). */
+  judgeFailures: number
+  /** Visible-tail fingerprint at the moment we last escalated, for re-engage. */
+  escalatedFp: string | null
   history: { kind: string; detail: string; reason: string }[]
 }
 
 const injectionMemory = new Map<number, InjectionMemory>()
+
+/** A judgment-LLM outage shouldn't strand sessions: escalate only after this
+ *  many consecutive failed judgment calls. */
+export const JUDGE_FAILURES_BEFORE_ESCALATE = 3
+
+function ensureMem(sessionId: number): InjectionMemory {
+  let mem = injectionMemory.get(sessionId)
+  if (!mem) {
+    mem = { fingerprint: null, ineffective: 0, judgeFailures: 0, escalatedFp: null, history: [] }
+    injectionMemory.set(sessionId, mem)
+  }
+  return mem
+}
 
 /** Test hook / lifecycle cleanup. */
 export function clearInjectionMemory(sessionId?: number): void {
@@ -39,11 +56,10 @@ export function clearInjectionMemory(sessionId?: number): void {
 }
 
 function rememberInjection(sessionId: number, fingerprint: string, kind: string, detail: string, reason: string): void {
-  const mem = injectionMemory.get(sessionId) ?? { fingerprint: null, ineffective: 0, history: [] }
+  const mem = ensureMem(sessionId)
   mem.fingerprint = fingerprint
   mem.history.push({ kind, detail, reason })
   if (mem.history.length > 10) mem.history.shift()
-  injectionMemory.set(sessionId, mem)
 }
 
 /**
@@ -61,7 +77,6 @@ export async function autoDriveSession(
     injectionMemory.delete(session.id)
     return
   }
-  if (session.status === 'needs_human') return
 
   const harness = store.getHarness(session.harnessId)
   if (!harness) return
@@ -93,12 +108,42 @@ export async function autoDriveSession(
   }
 
   const tail = sessionManager.getTail(session.id, 8192)
+  const fingerprint = quiescenceFingerprint(tail)
+  const mem = injectionMemory.get(session.id)
+
+  // Escalation is not a dead end. If a RECOGNIZABLE prompt shows up on a
+  // screen that changed since we escalated, the situation is new — take it
+  // back from the human and try to drive it to activity again.
+  if (session.status === 'needs_human') {
+    const probe = detectStall(harness, 0, tail)
+    const reengage = shouldReengage({
+      promptDetected: probe.reason === 'waiting_pattern',
+      currentFingerprint: fingerprint,
+      escalatedFingerprint: mem?.escalatedFp ?? null,
+      injectCount: session.autoInjectCount,
+      maxInjections: settings.autoDrive.maxInjectionsPerSession
+    })
+    if (!reengage) return
+    store.setSessionStatus(session.id, 'stalled')
+    if (mem) {
+      mem.escalatedFp = null
+      mem.fingerprint = null
+      mem.ineffective = 0
+    }
+    store.recordEvent('autodrive.reengaged', { sessionId: session.id, matchedPattern: probe.matchedPattern }, { sessionId: session.id })
+    store.recordBrainNote({
+      tick: tickState.current,
+      category: 'autodrive',
+      message: `"${session.title}" was waiting on a human, but a new prompt appeared — taking another automated pass at it.`,
+      detail: { sessionId: session.id }
+    })
+  }
+
   // Idle is measured on VISIBLE change when available — an animated status bar
   // emits bytes forever, but a session parked at a prompt is visually still.
   const idleSeconds =
     sessionManager.secondsSinceVisibleChange(session.id) ?? secondsSince(session.lastOutputAt)
   const signal = detectStall(harness, idleSeconds, tail)
-  const mem = injectionMemory.get(session.id)
   if (!signal.isCandidate) {
     if (session.status === 'stalled') {
       store.setSessionStatus(session.id, 'running')
@@ -119,7 +164,6 @@ export async function autoDriveSession(
   // one deterministic bare Enter (many TUI modals want a keypress, not text;
   // doesn't burn the injection cap), then hand off to a human rather than
   // burning the rest of the cap on the same stuck screen.
-  const fingerprint = quiescenceFingerprint(tail)
   if (mem?.fingerprint && mem.fingerprint === fingerprint) {
     if (mem.ineffective === 0) {
       mem.ineffective = 1
@@ -139,14 +183,14 @@ export async function autoDriveSession(
       })
       return
     }
-    escalate(session, 'automated interventions had no visible effect')
+    escalate(session, 'automated interventions had no visible effect', fingerprint)
     return
   }
   if (mem) mem.ineffective = 0
 
   // injection cap
   if (session.autoInjectCount >= settings.autoDrive.maxInjectionsPerSession) {
-    escalate(session, 'injection cap reached')
+    escalate(session, 'injection cap reached', fingerprint)
     return
   }
 
@@ -194,14 +238,35 @@ export async function autoDriveSession(
       StallDecisionSchema
     )
   } catch (err) {
-    log.warn('stall judgment failed; escalating', { sessionId: session.id, err: String(err) })
-    escalate(session, 'llm judgment failed')
+    // A failed judgment call is not the session's fault — the LLM endpoint may
+    // be down or mid-restart. Leave the session stalled and retry next tick;
+    // only a sustained outage hands off to a human.
+    const m = ensureMem(session.id)
+    m.judgeFailures += 1
+    if (m.judgeFailures >= JUDGE_FAILURES_BEFORE_ESCALATE) {
+      log.warn('stall judgment failed repeatedly; escalating', { sessionId: session.id, err: String(err) })
+      escalate(session, `llm judgment failed ${m.judgeFailures} ticks in a row`, fingerprint)
+      m.judgeFailures = 0
+    } else {
+      log.warn('stall judgment failed; will retry next tick', {
+        sessionId: session.id,
+        attempt: m.judgeFailures,
+        err: String(err)
+      })
+      store.recordEvent(
+        'autodrive.judgment_failed',
+        { sessionId: session.id, attempt: m.judgeFailures, err: String(err).slice(0, 200) },
+        { level: 'warn', sessionId: session.id }
+      )
+    }
     return
   }
+  const memAfterJudge = injectionMemory.get(session.id)
+  if (memAfterJudge) memAfterJudge.judgeFailures = 0
 
   const plan = resolveInjection(decision)
   if (plan.kind === 'escalate') {
-    escalate(session, decision.reason || 'llm escalated')
+    escalate(session, decision.reason || 'llm escalated', fingerprint)
     return
   }
   if (plan.kind === 'wait') {
@@ -225,7 +290,7 @@ export async function autoDriveSession(
       { sessionId: session.id, matched: bad, response: planDetail(plan) },
       { level: 'warn', sessionId: session.id }
     )
-    escalate(session, `denylist matched: ${bad}`)
+    escalate(session, `denylist matched: ${bad}`, fingerprint)
     return
   }
 
@@ -268,8 +333,12 @@ function planDetail(plan: { kind: string; text?: string; keys?: string[] }): str
   return plan.kind === 'keys' ? (plan.keys ?? []).join('+') : (plan.text ?? '')
 }
 
-function escalate(session: Session, reason: string): void {
-  injectionMemory.delete(session.id)
+function escalate(session: Session, reason: string, fingerprint = ''): void {
+  // Keep the memory: the escalation fingerprint is what lets a later NEW
+  // prompt re-engage auto-drive, and the history stays useful context.
+  const mem = ensureMem(session.id)
+  mem.escalatedFp = fingerprint || null
+  mem.ineffective = 0
   store.setSessionStatus(session.id, 'needs_human', reason)
   store.recordEvent('autodrive.escalated', { sessionId: session.id, reason }, { level: 'warn', sessionId: session.id })
   store.recordBrainNote({

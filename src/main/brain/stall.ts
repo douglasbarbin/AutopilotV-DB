@@ -36,6 +36,25 @@ export function detectStall(
 }
 
 /**
+ * Should a needs_human session be handed back to auto-drive? Escalation is not
+ * a dead end: when a RECOGNIZABLE prompt appears on a screen that has changed
+ * since the moment we escalated, the situation is new and worth another
+ * automated attempt. The injection cap still applies — a capped session would
+ * just re-escalate immediately, so don't bother.
+ */
+export function shouldReengage(opts: {
+  promptDetected: boolean
+  currentFingerprint: string
+  escalatedFingerprint: string | null
+  injectCount: number
+  maxInjections: number
+}): boolean {
+  if (!opts.promptDetected) return false
+  if (opts.injectCount >= opts.maxInjections) return false
+  return opts.escalatedFingerprint === null || opts.escalatedFingerprint !== opts.currentFingerprint
+}
+
+/**
  * Safety rail: does the proposed injection look destructive per the denylist?
  * Matching is case-insensitive substring against both the tail context and the
  * proposed response (a prompt asking to confirm an rm -rf should not be
