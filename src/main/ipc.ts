@@ -426,6 +426,7 @@ export function registerIpc(): void {
   sessionManager.on('status', () => pushState())
   brain.on('changed', () => pushState())
   void import('./apps/instances').then(({ appInstances }) => appInstances.on('changed', () => pushState()))
+  void import('./dev/pipeline').then(({ pipelineEvents }) => pipelineEvents.on('changed', () => pushState()))
   notifier.on('notification', (n: NotificationPayload) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(Channels.evtNotification, n)

@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { EventEmitter } from 'events'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { app } from 'electron'
@@ -48,6 +49,23 @@ export interface PipelineRun {
   /** Stage that produced the gating failure (callers treat 'secrets' specially:
    *  an agent can't fix a locked secrets manager — notify and hold instead). */
   failedStage?: string
+}
+
+// ---- live progress (the UI's "this story is being verified now" indicator) ----
+
+import type { ActiveVerification } from '@shared/types/domain'
+
+let activeVerification: ActiveVerification | null = null
+/** Emits 'changed' whenever the active verification starts/advances/ends. */
+export const pipelineEvents = new EventEmitter()
+
+function setActiveVerification(v: ActiveVerification | null): void {
+  activeVerification = v
+  pipelineEvents.emit('changed')
+}
+
+export function getActiveVerification(): ActiveVerification | null {
+  return activeVerification ? { ...activeVerification } : null
 }
 
 /** Revision stamp of the repo's resolved runbook. Stored on pipeline rollups
@@ -352,9 +370,18 @@ export async function runPipeline(
 
   const ran: string[] = []
   let failure: { stage: string; summary: string; output: string } | null = null
+  const progress = (stage: string): void =>
+    setActiveVerification({
+      taskId: task.id,
+      issueKey: task.issueKey,
+      checkpoint,
+      stage,
+      startedAt: new Date().toISOString()
+    })
 
   const runSimpleSlot = async (kind: 'setup' | 'build' | 'test', steps: RunbookStep[]): Promise<boolean> => {
     for (const step of steps) {
+      progress(kind)
       const o =
         kind === 'setup'
           ? await runSetupStep(repo, worktree.path, step, settings)
@@ -376,10 +403,12 @@ export async function runPipeline(
   }
 
   const full = checkpoint !== 'commit'
+  try {
   const stagesOk = await (async (): Promise<boolean> => {
     if (full && !(await runSimpleSlot('setup', rb.setup))) return false
     if (full) {
       for (const step of rb.secrets) {
+        progress('secrets')
         const o = await runSecretsStep(repo, worktree.path, step, settings)
         record(task, sha, checkpoint, 'secrets', o)
         ran.push('secrets')
@@ -400,6 +429,7 @@ export async function runPipeline(
 
     // app + e2e: only at full checkpoints, only when the runbook declares an app.
     if (full && rb.app) {
+      progress('app')
       await materializePersistedAppState(repo.id, worktree.path, rb.app.persist)
       const start = await appInstances.start(repo, worktree.path, rb.app, task.id)
       record(task, sha, checkpoint, 'app', {
@@ -420,6 +450,7 @@ export async function runPipeline(
           worktree: worktree.path
         }
         for (const step of rb.e2e) {
+          progress('e2e')
           const cmd = substituteVars(step.run, vars)
           const r = await execShell(cmd, {
             cwd: worktree.path,
@@ -465,6 +496,9 @@ export async function runPipeline(
     }
   }
   return { ok: true, ranStages: ran }
+  } finally {
+    setActiveVerification(null)
+  }
 }
 
 /** True when the runbook resolves to declared stages (pipeline path active). */

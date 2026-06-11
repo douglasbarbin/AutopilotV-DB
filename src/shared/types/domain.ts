@@ -182,6 +182,16 @@ export interface Session {
   title: string
 }
 
+/** The verification pipeline run currently executing, for the live UI indicator. */
+export interface ActiveVerification {
+  taskId: number
+  issueKey: string
+  checkpoint: VerifyCheckpoint
+  /** Stage currently running (setup/secrets/build/test/app/e2e). */
+  stage: string
+  startedAt: string
+}
+
 /** A running app started from a repo runbook's `app` slot (agnostic process). */
 export interface AppInstance {
   /** Unique instance name — safe for container/compose project names. */
@@ -450,6 +460,7 @@ export interface AppState {
   followups: FollowUp[]
   knowledge: KnowledgeItem[]
   appInstances: AppInstance[]
+  activeVerification: ActiveVerification | null
   appVersion: string
   brain: { lastTickAt: string | null; ticking: boolean; running: boolean; tick: number }
 }

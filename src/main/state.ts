@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import * as store from './store'
 import { brain } from './brain/brain'
 import { appInstances } from './apps/instances'
+import { getActiveVerification } from './dev/pipeline'
 import { Channels } from '@shared/types/ipc'
 import type { StateDelta, StateSlice } from '@shared/types/ipc'
 import type { AppState } from '@shared/types/domain'
@@ -44,6 +45,7 @@ export function buildState(): AppState {
     followups: store.listFollowUps(),
     knowledge: store.listKnowledge(),
     appInstances: appInstances.list(),
+    activeVerification: getActiveVerification(),
     appVersion: app.getVersion(),
     brain: brain.state
   }
@@ -104,6 +106,7 @@ function computeDelta(state: AppState): StateDelta {
       'followups',
       'knowledge',
       'appInstances',
+      'activeVerification',
       'brain'
     )
   } else {
@@ -123,6 +126,12 @@ function computeDelta(state: AppState): StateDelta {
     if (state.followups !== lastState.followups) changed.push('followups')
     if (state.knowledge !== lastState.knowledge) changed.push('knowledge')
     if (state.appInstances !== lastState.appInstances) changed.push('appInstances')
+    if (
+      state.activeVerification?.taskId !== lastState.activeVerification?.taskId ||
+      state.activeVerification?.stage !== lastState.activeVerification?.stage
+    ) {
+      changed.push('activeVerification')
+    }
     if (state.brain !== lastState.brain) changed.push('brain')
   }
   lastState = state

@@ -119,6 +119,7 @@ export type StateSlice =
   | 'followups'
   | 'knowledge'
   | 'appInstances'
+  | 'activeVerification'
   | 'brain'
 
 /**

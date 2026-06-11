@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { AppState, PrReview, TaskVerification, TrackerTask } from '@shared/types/domain'
+import { useState, type ReactNode } from 'react'
+import type { ActiveVerification, AppState, PrReview, TaskVerification, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
 import { DiffView } from './DiffView'
 import { TYPE_COLOR, taskStateLabel } from '../theme'
@@ -68,6 +68,7 @@ export function WorkQueue({ state }: { state: AppState }) {
             task={t}
             autoPublish={autoPublish}
             verifications={state.taskVerifications.filter((v) => v.taskId === t.id)}
+            active={state.activeVerification?.taskId === t.id ? state.activeVerification : null}
           />
         ))}
       </section>
@@ -135,59 +136,141 @@ const STAGE_MARK: Record<TaskVerification['status'], string> = {
   skipped: '–'
 }
 
-function VerifyBadge({ verifications }: { verifications: TaskVerification[] }) {
+/**
+ * Verification line: lives BELOW the state line. Shows the live "verifying
+ * now" pulse while this task's pipeline is executing, then one chip per stage
+ * with its latest verdict.
+ */
+function VerifyLine({
+  verifications,
+  active
+}: {
+  verifications: TaskVerification[]
+  active: ActiveVerification | null
+}) {
+  const [inspect, setInspect] = useState<TaskVerification | null>(null)
   const cmd = verifications.find((v) => v.kind === 'command')
   const spec = verifications.find((v) => v.kind === 'spec')
-  const pipeline = verifications.find((v) => v.kind === 'pipeline')
   const stages = STAGE_ORDER.map((k) => verifications.find((v) => v.kind === k)).filter(
     (v): v is TaskVerification => !!v
   )
 
-  if (!cmd && !spec && !pipeline && stages.length === 0) return null
+  if (!active && !cmd && !spec && stages.length === 0) return null
   const label: Record<TaskVerification['status'], string> = {
     pass: '✓ verified',
     fail: '✗ verify failed',
     error: '⚠ verify error',
     skipped: 'verify skipped'
   }
+
+  const chips: ReactNode[] = []
+  if (active) {
+    chips.push(
+      <span key="active" className="state-tag verifying" title={`pipeline running since ${active.startedAt}`}>
+        <span className="pulse-dot" /> verifying now — {active.stage} ({active.checkpoint.replace('_', ' ')})
+      </span>
+    )
+  }
+  for (const v of stages) {
+    // While a stage is live, the live chip speaks for it.
+    if (active && v.kind === active.stage) continue
+    chips.push(
+      <button
+        key={v.kind}
+        className="state-tag chip-btn"
+        style={{ color: VERIFY_COLOR[v.status] }}
+        title={`[${v.checkpoint}] ${v.summary} — click for details`}
+        onClick={() => setInspect(v)}
+      >
+        {STAGE_MARK[v.status]} {v.kind}
+      </button>
+    )
+  }
+  if (stages.length === 0 && cmd) {
+    chips.push(
+      <button
+        key="cmd"
+        className="state-tag chip-btn"
+        style={{ color: VERIFY_COLOR[cmd.status] }}
+        title={`${cmd.summary} — click for details`}
+        onClick={() => setInspect(cmd)}
+      >
+        {label[cmd.status]}
+      </button>
+    )
+  }
+  if (spec && spec.status === 'fail') {
+    chips.push(
+      <button
+        key="spec"
+        className="state-tag chip-btn"
+        style={{ color: 'var(--orange)' }}
+        title={`${spec.summary} — click for details`}
+        onClick={() => setInspect(spec)}
+      >
+        spec concerns
+      </button>
+    )
+  }
+
   return (
-    <>
-      {/* Staged pipeline: one chip per stage, latest verdict each. */}
-      {stages.map((v) => (
-        <span
-          key={v.kind}
-          className="state-tag"
-          style={{ color: VERIFY_COLOR[v.status] }}
-          title={`[${v.checkpoint}] ${v.summary}`}
-        >
-          {' · '}
-          {STAGE_MARK[v.status]} {v.kind}
+    <span className="work-sub verify-line">
+      {chips.map((c, i) => (
+        <span key={i} className="verify-chip">
+          {c}
         </span>
       ))}
-      {/* Legacy single command verdict (repos without runbook stages). */}
-      {stages.length === 0 && cmd && (
-        <span className="state-tag" style={{ color: VERIFY_COLOR[cmd.status] }} title={cmd.summary}>
-          {' · '}
-          {label[cmd.status]}
-        </span>
-      )}
-      {spec && spec.status === 'fail' && (
-        <span className="state-tag" style={{ color: 'var(--orange)' }} title={spec.summary}>
-          {' · '}spec concerns
-        </span>
-      )}
-    </>
+      {inspect && <VerificationDetail v={inspect} onClose={() => setInspect(null)} />}
+    </span>
+  )
+}
+
+/** Stage drill-down: what ran, what it said, and where the evidence lives. */
+function VerificationDetail({ v, onClose }: { v: TaskVerification; onClose: () => void }) {
+  const d = v.detail as { command?: string; output?: string; log?: string; artifacts?: string[]; gate?: string }
+  const output = d.output ?? d.log ?? ''
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal app-logs" onClick={(e) => e.stopPropagation()}>
+        <div className="runbook-head">
+          <strong style={{ color: VERIFY_COLOR[v.status] }}>
+            {STAGE_MARK[v.status]} {v.kind} — {v.status}
+          </strong>
+          <span className="work-sub">
+            {v.checkpoint.replace('_', ' ')} · {v.commitSha.slice(0, 7)} · {v.createdAt}
+            {d.gate ? ` · gate: ${d.gate}` : ''}
+          </span>
+          <button className="btn-soft" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <p className="review-summary">{v.summary}</p>
+        {d.command && (
+          <p className="review-summary">
+            <code>{d.command}</code>
+          </p>
+        )}
+        {(d.artifacts?.length ?? 0) > 0 && (
+          <p className="review-summary">
+            Evidence: {d.artifacts!.map((a) => <code key={a}>{a} </code>)}
+          </p>
+        )}
+        <pre>{output || '(no output captured)'}</pre>
+      </div>
+    </div>
   )
 }
 
 function TaskRow({
   task,
   autoPublish,
-  verifications
+  verifications,
+  active
 }: {
   task: TrackerTask
   autoPublish: boolean
   verifications: TaskVerification[]
+  active: ActiveVerification | null
 }) {
   const typeColor = TYPE_COLOR[task.issueType] ?? 'var(--comment)'
   // Reflect the real tracker status while unclaimed; show AutopilotV's phase once it's driving.
@@ -239,10 +322,10 @@ function TaskRow({
           ) : null}
           {task.phase === 'implementing' && ' · working…'}
           {task.phase === 'in_review' && ' · babysitting'}
-          {(task.phase === 'in_review' || task.phase === 'ready_to_merge') && (
-            <VerifyBadge verifications={verifications} />
-          )}
         </span>
+        {['draft', 'in_review', 'ready_to_merge'].includes(task.phase) && (
+          <VerifyLine verifications={verifications} active={active} />
+        )}
       </div>
       <div className="work-actions">
         {claimable && (
