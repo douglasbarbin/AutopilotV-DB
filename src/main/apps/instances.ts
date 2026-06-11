@@ -135,7 +135,14 @@ class AppInstanceManager extends EventEmitter {
     }
     proc.stdout?.on('data', onData)
     proc.stderr?.on('data', onData)
-    proc.on('exit', () => {
+    const detached = app.detached
+    proc.on('exit', (code) => {
+      // A detached launcher exiting cleanly is the SUCCESS path — the real
+      // app lives on (e.g. `aspire start`, `docker compose up -d`).
+      if (detached && (code ?? 0) === 0) {
+        this.emit('changed')
+        return
+      }
       if (li.info.status !== 'exited') {
         li.info.status = li.info.status === 'ready' ? 'exited' : 'failed'
       }
@@ -176,6 +183,18 @@ class AppInstanceManager extends EventEmitter {
     const timeoutMs = (ready?.timeoutSeconds ?? 300) * 1000
 
     if (!ready?.url && !ready?.logPattern) {
+      if (app.detached) {
+        // No probe: the launcher's own exit code is the only ready signal.
+        while (li.proc.exitCode === null && Date.now() - started < timeoutMs) await sleep(500)
+        const ok = li.proc.exitCode === 0
+        return {
+          ok,
+          summary: ok
+            ? 'launcher completed (no ready probe declared)'
+            : `launcher exited with code ${li.proc.exitCode ?? 'none (timeout)'}`,
+          ms: Date.now() - started
+        }
+      }
       await sleep(5000)
       const alive = li.proc.exitCode === null
       return {
@@ -196,13 +215,8 @@ class AppInstanceManager extends EventEmitter {
     }
 
     while (Date.now() - started < timeoutMs) {
-      if (li.proc.exitCode !== null) {
-        return {
-          ok: false,
-          summary: `app exited (code ${li.proc.exitCode}) before becoming ready`,
-          ms: Date.now() - started
-        }
-      }
+      // Probes are checked BEFORE the exit check: a detached launcher prints
+      // its ready line and exits, and both can land between two polls.
       if (re && re.test(normalizeTerminalText(li.ring))) {
         return { ok: true, summary: `ready (log pattern matched)`, ms: Date.now() - started }
       }
@@ -216,6 +230,13 @@ class AppInstanceManager extends EventEmitter {
           /* not up yet */
         }
       }
+      if (li.proc.exitCode !== null && !(app.detached && li.proc.exitCode === 0)) {
+        return {
+          ok: false,
+          summary: `app exited (code ${li.proc.exitCode}) before becoming ready`,
+          ms: Date.now() - started
+        }
+      }
       await sleep(1000)
     }
     return {
@@ -225,11 +246,13 @@ class AppInstanceManager extends EventEmitter {
     }
   }
 
-  /** Teardown command (if declared), then kill the process group. */
+  /** Teardown command (if declared), then kill the process group. The
+   *  teardown runs even when the supervised process is gone — for detached
+   *  launchers it is the ONLY thing that stops the real app. */
   async stop(id: string, reason: string): Promise<void> {
     const li = this.live.get(id)
     if (!li) return
-    if (li.teardown && li.proc.exitCode === null) {
+    if (li.teardown) {
       const cmd = substituteVars(li.teardown, li.vars)
       try {
         const { execShell } = await import('../util/exec')

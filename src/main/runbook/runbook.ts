@@ -57,6 +57,10 @@ const AppSchema = z.object({
    *  instances); a fixed number or an empty map means the project owns its
    *  ports and runs exclusively. */
   ports: z.record(z.union([z.literal('auto'), z.number()])).catch({}),
+  /** True when `run` is a LAUNCHER that exits after starting the real app
+   *  (e.g. `aspire start`, `docker compose up -d`). A clean launcher exit is
+   *  then not an app death, and `teardown` is the only way to stop the app. */
+  detached: z.boolean().catch(false),
   ready: ReadySchema.optional(),
   teardown: z.string().optional(),
   timeoutSeconds: z.number().positive().catch(600)
