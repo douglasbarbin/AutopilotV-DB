@@ -143,7 +143,9 @@ export function makeProvider(settings: Settings): LlmProvider {
 export async function judgeValidated<T>(
   provider: LlmProvider,
   req: JudgeRequest,
-  schema: z.ZodType<T>
+  // Input widened to unknown so schemas using .catch()/.default() (whose input
+  // type differs from their output type) are accepted.
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>
 ): Promise<T> {
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {

@@ -84,6 +84,19 @@ export { recordEvent, listEvents, recordBrainNote, listBrainNotes } from './even
 
 export { insertVerification, listVerificationsForTask, listRecentVerifications } from './verifications'
 
+export {
+  insertFollowUp,
+  listFollowUps,
+  getFollowUp,
+  updateFollowUp,
+  setFollowUpStatus,
+  insertKnowledge,
+  listKnowledge,
+  setKnowledgeStatus,
+  selectKnowledgeForInjection,
+  markKnowledgeApplied
+} from './insights'
+
 export * as metrics from './metrics'
 
 export { applyModelDefaults, runStartupNormalizations } from './migrations_apply'

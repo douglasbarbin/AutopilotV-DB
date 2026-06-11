@@ -54,11 +54,11 @@ function killTaskSessionIfLive(task: TrackerTask, reason: string): void {
 
 /**
  * Persist whatever metadata a consumed signal carried. A structured report is
- * recorded as a `signal.report` event (the post-implementation analysis engine
- * harvests these); malformed JSON is flagged but never blocks the phase
- * transition that the bare signal already triggered.
+ * recorded as a `signal.report` event and harvested into the insights store
+ * (follow-ups + learned knowledge); malformed JSON is flagged but never blocks
+ * the phase transition that the bare signal already triggered.
  */
-function recordSignalReport(task: TrackerTask, phase: string, consumed: ConsumedSignal): void {
+async function recordSignalReport(task: TrackerTask, phase: string, consumed: ConsumedSignal): Promise<void> {
   if (consumed.malformed) {
     store.recordEvent(
       'signal.malformed',
@@ -77,6 +77,13 @@ function recordSignalReport(task: TrackerTask, phase: string, consumed: Consumed
       learnings: consumed.report.learnings,
       deviations: consumed.report.deviations
     })
+    try {
+      // Lazy import, same rationale as ./verify below.
+      const { harvestSignalReport } = await import('../analysis/engine')
+      harvestSignalReport(task, consumed.report)
+    } catch (err) {
+      log.warn('signal report harvest failed', { taskId: task.id, err: String(err) })
+    }
   }
 }
 
@@ -100,7 +107,7 @@ export async function advanceImplementing(task: TrackerTask, settings: Settings)
   if (worktree.path && isSignalled(worktree.path, SIGNAL.IMPL)) {
     const consumed = consumeReport(worktree.path, SIGNAL.IMPL)
     if (consumed) {
-      recordSignalReport(task, 'impl', consumed)
+      await recordSignalReport(task, 'impl', consumed)
       const url = extractPrUrl(consumed)
       const m = url?.match(/\/(?:pullrequest|pull)\/(\d+)/i)
       if (url && m) pr = { number: Number(m[1]), url }
@@ -147,7 +154,7 @@ export async function advanceRevising(task: TrackerTask, settings: Settings): Pr
   if (signalled || !isTaskSessionActive(task)) {
     if (signalled && worktree) {
       const consumed = consumeReport(worktree.path, SIGNAL.REVISE)
-      if (consumed) recordSignalReport(task, 'revise', consumed)
+      if (consumed) await recordSignalReport(task, 'revise', consumed)
     }
     killTaskSessionIfLive(task, 'revision complete')
 
@@ -229,7 +236,7 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
   const addrSignalled = worktree ? isSignalled(worktree.path, SIGNAL.ADDRESS_COMMENTS) : false
   if (addrSignalled && worktree) {
     const consumed = consumeReport(worktree.path, SIGNAL.ADDRESS_COMMENTS)
-    if (consumed) recordSignalReport(task, 'address_comments', consumed)
+    if (consumed) await recordSignalReport(task, 'address_comments', consumed)
     killTaskSessionIfLive(task, 'comments addressed')
     // Record the commit we just pushed and the current open-thread count, so a
     // sticky "changes requested" review doesn't re-spawn another round on the
@@ -399,11 +406,18 @@ async function startVerificationFix(
   }, 'warn')
 }
 
-/** PR merged → stop tracking. Prune the worktree; do NOT touch the tracker
- *  (QA owns Done). */
+/** PR merged → stop tracking. Run post-merge analysis (it needs the worktree's
+ *  diff, so it runs before pruning), prune the worktree; do NOT touch the
+ *  tracker (QA owns Done). */
 export async function finishMerged(task: TrackerTask): Promise<void> {
   if (task.sessionId && sessionManager.isLive(task.sessionId)) {
     sessionManager.kill(task.sessionId, 'pr merged')
+  }
+  try {
+    const { runPostMergeAnalysis } = await import('../analysis/engine')
+    await runPostMergeAnalysis(task, store.getSettings())
+  } catch (err) {
+    log.warn('post-merge analysis failed', { taskId: task.id, err: String(err) })
   }
   if (task.worktreeId) {
     const wt = store.getWorktree(task.worktreeId)

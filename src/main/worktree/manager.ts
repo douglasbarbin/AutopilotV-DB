@@ -54,6 +54,30 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * Compose the AGENTS.md block for a new worktree: the operator's static
+ * template plus the auto-curated learned conventions for this repo and role.
+ * Injected knowledge rows get their usage tracked so the consolidation pass
+ * can tell which learnings are actually flowing into sessions.
+ */
+export function buildAgentsContent(repoId: number, role: 'coding' | 'review'): string {
+  const base = store.getSettings().agentsTemplate
+  let items: ReturnType<typeof store.selectKnowledgeForInjection> = []
+  try {
+    items = store.selectKnowledgeForInjection(repoId, role)
+  } catch (err) {
+    log.warn('knowledge selection failed; injecting base template only', { err: String(err) })
+  }
+  if (items.length === 0) return base
+  store.markKnowledgeApplied(items.map((i) => i.id))
+  const lines = items.map((i) => `- ${i.insight}${i.evidence ? ` (ref: ${i.evidence})` : ''}`)
+  return (
+    `${base.trim()}\n\n` +
+    `### Learned conventions (auto-curated from past work in this repo)\n\n` +
+    lines.join('\n')
+  )
+}
+
 /** Generate and write ADJACENT_WORK.md in the worktree root. */
 export async function writeAdjacentWorkFile(worktreePath: string, repoId: number): Promise<void> {
   try {
@@ -159,7 +183,7 @@ export async function provisionReviewWorktree(
 
   await execOrThrow('git', ['worktree', 'add', '--force', dest, `origin/${branch}`], { cwd })
 
-  await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
+  await injectAgentsTemplate(dest, buildAgentsContent(repo.id, 'review'))
 
   const id = store.createWorktree({
     path: dest,
@@ -188,7 +212,7 @@ export async function provisionDevWorktree(repo: Repo, branch: string): Promise<
   await execOrThrow('git', ['worktree', 'add', '-b', branch, dest, `origin/${repo.defaultBranch}`], {
     cwd
   })
-  await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
+  await injectAgentsTemplate(dest, buildAgentsContent(repo.id, 'coding'))
   await addToGitExclude(dest, ALL_SIGNALS)
   await writeAdjacentWorkFile(dest, repo.id)
   const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
@@ -223,7 +247,7 @@ export async function provisionDevWorktreeForBranch(repo: Repo, branch: string):
   await execOrThrow('git', ['worktree', 'add', '--force', '-B', branch, dest, `origin/${branch}`], {
     cwd
   })
-  await injectAgentsTemplate(dest, store.getSettings().agentsTemplate)
+  await injectAgentsTemplate(dest, buildAgentsContent(repo.id, 'coding'))
   await addToGitExclude(dest, ALL_SIGNALS)
   await writeAdjacentWorkFile(dest, repo.id)
   const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })

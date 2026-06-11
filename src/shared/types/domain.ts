@@ -235,6 +235,53 @@ export interface BrainNote {
   detail: Record<string, unknown>
 }
 
+// ──────────────────── post-implementation insights (PM loop) ────────────────────
+
+export type FollowUpKind = 'todo' | 'tech_debt' | 'bug' | 'enhancement' | 'test_gap'
+export type FollowUpStatus = 'candidate' | 'created' | 'dismissed'
+
+/** A future-work item harvested from a signal report or post-merge analysis. */
+export interface FollowUp {
+  id: number
+  taskId: number | null
+  issueKey: string
+  repoId: number | null
+  projectKey: string
+  title: string
+  description: string
+  kind: FollowUpKind
+  priority: 'low' | 'medium' | 'high'
+  files: string[]
+  /** Where it came from: 'signal' (agent report) or 'analysis' (post-merge LLM). */
+  source: string
+  status: FollowUpStatus
+  /** Tracker issue key once "Create story" has been clicked. */
+  createdIssueKey: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type KnowledgeRole = 'coding' | 'review' | 'brain'
+export type KnowledgeStatus = 'candidate' | 'active' | 'retired'
+
+/** A durable learned insight, injected into future sessions' AGENTS.md once active. */
+export interface KnowledgeItem {
+  id: number
+  scope: 'repo' | 'project' | 'global'
+  repoId: number | null
+  projectKey: string
+  role: KnowledgeRole
+  insight: string
+  evidence: string
+  confidence: 'low' | 'medium' | 'high'
+  status: KnowledgeStatus
+  source: string
+  hitCount: number
+  lastAppliedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export type LlmProviderKind = 'local' | 'harness'
 
 export interface Settings {
@@ -345,6 +392,8 @@ export interface AppState {
   settings: Settings
   events: AppEvent[]
   brainNotes: BrainNote[]
+  followups: FollowUp[]
+  knowledge: KnowledgeItem[]
   appVersion: string
   brain: { lastTickAt: string | null; ticking: boolean; running: boolean; tick: number }
 }

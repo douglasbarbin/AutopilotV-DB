@@ -261,6 +261,60 @@ const MIGRATIONS: Migration[] = [
     up: `
     ALTER TABLE tasks ADD COLUMN addressed_threads INTEGER NOT NULL DEFAULT 0;
     `
+  },
+  {
+    // Post-implementation analysis (PM loop): structured follow-up work items
+    // and learned knowledge harvested from agent signal reports, PR
+    // conversations, and verification history.
+    //   - followups: candidate backlog items surfaced in the Backlog &
+    //     Insights pane; "Create story" pushes one to the tracker (human-gated)
+    //     and records the created issue key.
+    //   - knowledge: durable insights injected into future sessions' AGENTS.md.
+    //     status: candidate (awaiting human accept) → active (injected) →
+    //     retired. hit_count/last_applied_at track injection usage.
+    // dedupe_hash is unique per table so the same item harvested twice
+    // (e.g. report + post-merge analysis) inserts once (INSERT OR IGNORE).
+    version: 15,
+    up: `
+    CREATE TABLE followups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER,
+      issue_key TEXT NOT NULL DEFAULT '',
+      repo_id INTEGER,
+      project_key TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      files_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'signal',
+      status TEXT NOT NULL DEFAULT 'candidate',
+      created_issue_key TEXT NOT NULL DEFAULT '',
+      dedupe_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_followups_status ON followups(status);
+
+    CREATE TABLE knowledge (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL DEFAULT 'repo',
+      repo_id INTEGER,
+      project_key TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'coding',
+      insight TEXT NOT NULL,
+      evidence TEXT NOT NULL DEFAULT '',
+      confidence TEXT NOT NULL DEFAULT 'medium',
+      status TEXT NOT NULL DEFAULT 'candidate',
+      source TEXT NOT NULL DEFAULT 'signal',
+      hit_count INTEGER NOT NULL DEFAULT 0,
+      last_applied_at TEXT,
+      dedupe_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_knowledge_status ON knowledge(status);
+    `
   }
 ]
 

@@ -40,6 +40,8 @@ export function buildState(): AppState {
     settings: store.getSettings(),
     events: store.listEvents(200),
     brainNotes: store.listBrainNotes(200),
+    followups: store.listFollowUps(),
+    knowledge: store.listKnowledge(),
     appVersion: app.getVersion(),
     brain: brain.state
   }
@@ -97,6 +99,8 @@ function computeDelta(state: AppState): StateDelta {
       'settings',
       'events',
       'brainNotes',
+      'followups',
+      'knowledge',
       'brain'
     )
   } else {
@@ -113,6 +117,8 @@ function computeDelta(state: AppState): StateDelta {
     if (state.settings !== lastState.settings) changed.push('settings')
     if (state.events !== lastState.events) changed.push('events')
     if (state.brainNotes !== lastState.brainNotes) changed.push('brainNotes')
+    if (state.followups !== lastState.followups) changed.push('followups')
+    if (state.knowledge !== lastState.knowledge) changed.push('knowledge')
     if (state.brain !== lastState.brain) changed.push('brain')
   }
   lastState = state

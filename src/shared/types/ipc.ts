@@ -104,6 +104,8 @@ export type StateSlice =
   | 'settings'
   | 'events'
   | 'brainNotes'
+  | 'followups'
+  | 'knowledge'
   | 'brain'
 
 /**

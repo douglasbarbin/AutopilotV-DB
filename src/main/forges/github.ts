@@ -111,6 +111,31 @@ export const githubForge: Forge = {
     return r.stdout
   },
 
+  async listPrComments(repoNwo: string, number: number): Promise<{ author: string; body: string }[]> {
+    const r = await exec(
+      'gh',
+      ['pr', 'view', String(number), '--repo', repoNwo, '--json', 'comments,reviews'],
+      { timeoutMs: 20_000 }
+    )
+    if (r.code !== 0) return []
+    try {
+      const row = JSON.parse(r.stdout) as {
+        comments?: { author?: { login?: string }; body?: string }[]
+        reviews?: { author?: { login?: string }; body?: string }[]
+      }
+      const out: { author: string; body: string }[] = []
+      for (const c of row.comments ?? []) {
+        if (c.body) out.push({ author: c.author?.login ?? '', body: c.body })
+      }
+      for (const c of row.reviews ?? []) {
+        if (c.body) out.push({ author: c.author?.login ?? '', body: c.body })
+      }
+      return out
+    } catch {
+      return []
+    }
+  },
+
   async createPr(opts: {
     cwd: string
     title: string

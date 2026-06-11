@@ -117,4 +117,15 @@ export interface Forge {
 
   /** Connectivity / auth check for the integration health dot. */
   checkAuth(config: ForgeConfig): Promise<ForgeAuthStatus>
+
+  /**
+   * Optional: PR conversation bodies (issue comments + review summaries) for
+   * post-merge analysis mining. Adapters without an implementation are simply
+   * skipped by the analysis engine.
+   */
+  listPrComments?(
+    repoNwo: string,
+    number: number,
+    config: ForgeConfig
+  ): Promise<{ author: string; body: string }[]>
 }
