@@ -1,6 +1,7 @@
 import type { HarnessConfig } from '@shared/types/domain'
 import type { StallDecision } from '../llm/provider'
 import { normalizeTerminalText } from '../util/ansi'
+import { isKeyName, type KeyName } from '../sessions/kickoff'
 
 export interface StallSignal {
   isCandidate: boolean
@@ -64,6 +65,7 @@ export const DEFAULT_NUDGE =
 
 export type InjectionPlan =
   | { kind: 'respond' | 'nudge'; text: string }
+  | { kind: 'keys'; keys: KeyName[] }
   | { kind: 'wait' }
   | { kind: 'escalate' }
 
@@ -77,6 +79,11 @@ export function resolveInjection(decision: StallDecision): InjectionPlan {
     case 'respond':
       // A prompt answer with nothing to send is not actionable — hand off.
       return decision.response ? { kind: 'respond', text: decision.response } : { kind: 'escalate' }
+    case 'press_keys': {
+      const keys = (decision.keys ?? []).map((k) => k.trim().toLowerCase()).filter(isKeyName)
+      // Unknown key names are dropped rather than guessed; nothing left ⇒ hand off.
+      return keys.length > 0 ? { kind: 'keys', keys } : { kind: 'escalate' }
+    }
     case 'nudge':
       return { kind: 'nudge', text: decision.response?.trim() || DEFAULT_NUDGE }
     case 'wait':

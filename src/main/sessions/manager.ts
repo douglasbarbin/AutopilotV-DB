@@ -8,7 +8,18 @@ import * as store from '../store'
 import type { HarnessConfig, SessionStatus, WorkKind } from '@shared/types/domain'
 import type { SessionOutputChunk } from '@shared/types/ipc'
 import { preparePiLocalModel, substitute } from './localHarness'
-import { HARNESS_STARTUP_DELAY_MS, HARNESS_SUBMIT_DELAY_MS } from './kickoff'
+import { quiescenceFingerprint } from '../util/ansi'
+import {
+  KICKOFF_POLL_MS,
+  KICKOFF_ECHO_TIMEOUT_MS,
+  KICKOFF_ECHO_GRACE_MS,
+  KICKOFF_SUBMIT_SETTLE_MS,
+  KEY_SEQUENCES,
+  isReadyForPrompt,
+  judgeEcho,
+  type EchoVerdict,
+  type KeyName
+} from './kickoff'
 
 interface LiveSession {
   id: number
@@ -18,9 +29,20 @@ interface LiveSession {
   transcript: WriteStream
   transcriptPath: string
   harness: HarnessConfig
+  /** Wall-clock spawn time, for kickoff readiness probing. */
+  spawnedAt: number
+  /** The task prompt this session was started with (context for stall judgment). */
+  initialInput: string | null
+  /** Stability fingerprint of the visible tail + when it last changed. */
+  visibleFp: string
+  visibleChangedAt: number
 }
 
 const RING_MAX = 64 * 1024
+/** Window of the ring buffer that feeds the visible-quiescence fingerprint. */
+const FP_WINDOW = 2048
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export interface SpawnOptions {
   kind: WorkKind
@@ -122,7 +144,11 @@ export class SessionManager extends EventEmitter {
       ring: '',
       transcript,
       transcriptPath,
-      harness: opts.harness
+      harness: opts.harness,
+      spawnedAt: Date.now(),
+      initialInput: opts.initialInput ?? null,
+      visibleFp: '',
+      visibleChangedAt: Date.now()
     }
     this.live.set(sessionId, ls)
 
@@ -138,6 +164,14 @@ export class SessionManager extends EventEmitter {
     proc.onData((data) => {
       ls.seq += 1
       ls.ring = (ls.ring + data).slice(-RING_MAX)
+      // Track when the VISIBLE screen content last changed, ignoring spinner
+      // frames and timers — raw byte flow keeps lastOutputAt fresh forever on
+      // an animated TUI, which is exactly what masked stuck-at-prompt stalls.
+      const fp = quiescenceFingerprint(ls.ring.slice(-FP_WINDOW))
+      if (fp !== ls.visibleFp) {
+        ls.visibleFp = fp
+        ls.visibleChangedAt = Date.now()
+      }
       ls.transcript.write(data)
       store.markSessionOutput(sessionId)
       this.emit('output', { sessionId, seq: ls.seq, data })
@@ -167,21 +201,73 @@ export class SessionManager extends EventEmitter {
     })
 
     if (opts.initialInput) {
-      // Type the prompt once the harness UI is up, then send a SEPARATE submit
-      // keypress to kick off the task — interactive TUIs (Pi, Claude, …) don't
-      // run on the text alone; they need a discrete Enter after it.
-      const text = opts.initialInput.replace(/[\r\n]+$/, '')
-      const submit = opts.harness.inject.submitKey || '\r'
-      setTimeout(() => {
-        this.write(sessionId, text)
-        setTimeout(() => {
-          this.write(sessionId, submit)
-          store.recordEvent('session.kickoff', { via: 'initial-input' }, { sessionId })
-        }, HARNESS_SUBMIT_DELAY_MS)
-      }, HARNESS_STARTUP_DELAY_MS)
+      void this.kickoff(ls, opts.initialInput)
     }
 
     return sessionId
+  }
+
+  /**
+   * Closed-loop kickoff: wait until the harness TUI looks ready (per-harness
+   * ready pattern, or visible-output quiescence, capped by a boot-wait
+   * ceiling), type the prompt, wait for it to echo back, then send a SEPARATE
+   * submit keypress — interactive TUIs don't run on the text alone. If the
+   * keystrokes visibly went nowhere, the prompt is retyped once before
+   * submitting; either way the outcome is recorded so stall judgment knows
+   * whether this session verifiably received its task.
+   */
+  private async kickoff(ls: LiveSession, initialInput: string): Promise<void> {
+    const sessionId = ls.id
+    const text = initialInput.replace(/[\r\n]+$/, '')
+    const submit = ls.harness.inject.submitKey || '\r'
+
+    // 1. readiness
+    while (this.live.has(sessionId)) {
+      const ready = isReadyForPrompt(
+        {
+          buffer: ls.ring,
+          elapsedMs: Date.now() - ls.spawnedAt,
+          msSinceVisibleChange: ls.seq > 0 ? Date.now() - ls.visibleChangedAt : null
+        },
+        ls.harness.ready?.promptPattern
+      )
+      if (ready) break
+      await sleep(KICKOFF_POLL_MS)
+    }
+    if (!this.live.has(sessionId)) return
+    const readyMs = Date.now() - ls.spawnedAt
+
+    // 2. type the prompt
+    const bufferBeforeTyping = ls.ring
+    this.write(sessionId, text)
+
+    // 3. wait for the echo
+    let verdict: EchoVerdict = 'proceed'
+    let retyped = false
+    const typedAt = Date.now()
+    while (this.live.has(sessionId) && Date.now() - typedAt < KICKOFF_ECHO_TIMEOUT_MS) {
+      verdict = judgeEcho(bufferBeforeTyping, ls.ring, text)
+      if (verdict === 'echoed') break
+      if (verdict === 'retype' && !retyped && Date.now() - typedAt >= KICKOFF_ECHO_GRACE_MS) {
+        retyped = true
+        this.write(sessionId, text)
+      }
+      await sleep(KICKOFF_POLL_MS)
+    }
+    if (!this.live.has(sessionId)) return
+
+    // 4. submit
+    await sleep(KICKOFF_SUBMIT_SETTLE_MS)
+    this.write(sessionId, submit)
+    const echoVerified = verdict === 'echoed'
+    store.recordEvent(
+      'session.kickoff',
+      { via: 'initial-input', readyMs, echoVerified, retyped },
+      { sessionId, level: echoVerified ? 'info' : 'warn' }
+    )
+    if (!echoVerified) {
+      log.warn('kickoff prompt did not visibly echo; submitted anyway', { sessionId, retyped })
+    }
   }
 
   write(sessionId: number, data: string): void {
@@ -195,6 +281,28 @@ export class SessionManager extends EventEmitter {
     const ls = this.live.get(sessionId)
     if (!ls) return
     ls.proc.write(response + ls.harness.inject.submitKey)
+  }
+
+  /** Press raw named keys (no submit key appended). */
+  sendKeys(sessionId: number, keys: KeyName[]): void {
+    const ls = this.live.get(sessionId)
+    if (!ls) return
+    ls.proc.write(keys.map((k) => KEY_SEQUENCES[k]).join(''))
+  }
+
+  /** The task prompt this session was started with, if any. */
+  getInitialInput(sessionId: number): string | null {
+    return this.live.get(sessionId)?.initialInput ?? null
+  }
+
+  /**
+   * Seconds since the VISIBLE terminal content last changed (spinner frames and
+   * timers excluded), or null when the session isn't live or hasn't output yet.
+   */
+  secondsSinceVisibleChange(sessionId: number): number | null {
+    const ls = this.live.get(sessionId)
+    if (!ls || ls.seq === 0) return null
+    return (Date.now() - ls.visibleChangedAt) / 1000
   }
 
   getTail(sessionId: number, bytes = 4096): string {

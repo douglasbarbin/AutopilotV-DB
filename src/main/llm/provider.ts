@@ -8,11 +8,14 @@ import { log } from '../log'
 // ---- Structured judgment schemas ----
 
 export const StallDecisionSchema = z.object({
-  // respond: answer an interactive prompt. nudge: the agent went quiet without
-  // finishing and isn't at a prompt — push it to keep going. wait: it's still
-  // making progress, leave it alone. escalate: hand off to a human.
-  action: z.enum(['respond', 'nudge', 'wait', 'escalate']),
+  // respond: answer an interactive prompt with text. press_keys: the prompt
+  // needs raw keypresses (Enter to continue, arrow-key menus) rather than
+  // text. nudge: the agent went quiet without finishing and isn't at a prompt
+  // — push it to keep going. wait: it's still making progress, leave it alone.
+  // escalate: hand off to a human.
+  action: z.enum(['respond', 'press_keys', 'nudge', 'wait', 'escalate']),
   response: z.string().nullable(),
+  keys: z.array(z.string()).nullable().optional(),
   reason: z.string()
 })
 export type StallDecision = z.infer<typeof StallDecisionSchema>

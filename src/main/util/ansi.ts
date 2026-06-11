@@ -34,3 +34,21 @@ export function normalizeTerminalText(text: string): string {
     })
     .join('\n')
 }
+
+/**
+ * Reduce terminal output to a stability fingerprint for quiescence detection.
+ * Harness TUIs animate even while waiting on input — braille spinners, elapsed
+ * timers, token counters — so byte- or even visible-text-level comparison never
+ * settles. Dropping spinner glyphs and digits means "the screen is doing
+ * nothing but idling animations" compares equal across frames, while any real
+ * progress (a new log line, a new prompt) still changes the fingerprint.
+ * Detection over-triggering slightly is fine: the stall LLM sees the real tail
+ * and can still answer "wait".
+ */
+export function quiescenceFingerprint(text: string): string {
+  return normalizeTerminalText(text)
+    .replace(/[⠀-⣿]/g, '') // braille spinner frames
+    .replace(/[0-9]/g, '') // timers, token counts, progress percentages
+    .replace(/\s+/g, ' ')
+    .trim()
+}

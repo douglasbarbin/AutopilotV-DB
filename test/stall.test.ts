@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectStall, violatesDenylist } from '../src/main/brain/stall'
+import { detectStall, resolveInjection, violatesDenylist } from '../src/main/brain/stall'
 import { normalizeTerminalText } from '../src/main/util/ansi'
 import type { HarnessConfig } from '@shared/types/domain'
 
@@ -63,6 +63,31 @@ describe('normalizeTerminalText', () => {
   it('keeps only the visible segment after carriage-return repaints', () => {
     expect(normalizeTerminalText('10%\r50%\r100% done')).toBe('100% done')
     expect(normalizeTerminalText('line1\nspin\rfinal\nline3')).toBe('line1\nfinal\nline3')
+  })
+})
+
+describe('resolveInjection', () => {
+  it('maps press_keys with valid keys to a keys plan', () => {
+    const plan = resolveInjection({ action: 'press_keys', response: null, keys: ['Enter', 'down'], reason: 'menu' })
+    expect(plan).toEqual({ kind: 'keys', keys: ['enter', 'down'] })
+  })
+
+  it('escalates press_keys with no usable keys', () => {
+    expect(resolveInjection({ action: 'press_keys', response: null, keys: ['ctrl+c'], reason: 'x' })).toEqual({
+      kind: 'escalate'
+    })
+    expect(resolveInjection({ action: 'press_keys', response: null, keys: null, reason: 'x' })).toEqual({
+      kind: 'escalate'
+    })
+  })
+
+  it('escalates respond with an empty response', () => {
+    expect(resolveInjection({ action: 'respond', response: null, reason: 'x' })).toEqual({ kind: 'escalate' })
+  })
+
+  it('nudge falls back to the default wording', () => {
+    const plan = resolveInjection({ action: 'nudge', response: null, reason: 'quiet' })
+    expect(plan.kind).toBe('nudge')
   })
 })
 
