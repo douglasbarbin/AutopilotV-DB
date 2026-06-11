@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { app } from 'electron'
 import { log } from '../log'
@@ -177,6 +177,14 @@ async function runSecretsStep(
     }
   }
 
+  // Pre-delete the declared outputs: inject-style tools (e.g. `op inject`
+  // without -f) refuse to overwrite an existing file non-interactively, which
+  // wedged re-runs in a reused worktree. The outputs are ours to manage — they
+  // are either regenerated right now or served from the cache.
+  for (const rel of step.produces) {
+    rmSync(join(worktreePath, rel), { force: true })
+  }
+
   const r = await execShell(step.run, {
     cwd: worktreePath,
     timeoutMs: (step.timeoutSeconds ?? 120) * 1000
@@ -217,12 +225,69 @@ async function runSecretsStep(
   }
 }
 
-/** Drop a repo's cached secrets (Settings → Refresh secrets). */
+/** Drop a repo's cached secrets AND persisted app state (Settings → Refresh
+ *  secrets) — a refresh should force both a fresh `op` run and a re-seed. */
 export async function clearSecretsCache(repoId: number): Promise<number> {
   const { listSecretKeys, deleteSecret } = await import('../secrets')
-  const keys = await listSecretKeys(`secretscache:${repoId}:`)
+  const keys = [
+    ...(await listSecretKeys(`secretscache:${repoId}:`)),
+    ...(await listSecretKeys(`apppersist:${repoId}`))
+  ]
   for (const k of keys) await deleteSecret(k)
   return keys.length
+}
+
+// ---- persisted app state (e.g. emulator seed locks) ----
+
+const appPersistKey = (repoId: number): string => `apppersist:${repoId}`
+
+/**
+ * Materialize app-generated state files captured from a previous worktree
+ * (runbook `app.persist`) so the app skips machine-global re-initialization —
+ * e.g. an App Config emulator seed lock that prevents a re-seed (and another
+ * `op` round) when the emulator's Docker volume already holds the data.
+ */
+export async function materializePersistedAppState(
+  repoId: number,
+  worktreePath: string,
+  persist: string[]
+): Promise<void> {
+  if (persist.length === 0) return
+  const raw = await getSecret(appPersistKey(repoId))
+  if (!raw) return
+  try {
+    const entry = JSON.parse(raw) as SecretsCacheEntry
+    const wanted: Record<string, string> = {}
+    for (const rel of persist) {
+      if (entry.files[rel] !== undefined && !existsSync(join(worktreePath, rel))) {
+        wanted[rel] = entry.files[rel]
+      }
+    }
+    if (Object.keys(wanted).length > 0) await materializeFiles(worktreePath, wanted)
+  } catch (err) {
+    log.warn('persisted app state unreadable; app will re-initialize', { repoId, err: String(err) })
+  }
+}
+
+/** Capture the declared app state files after a successful start. */
+export async function capturePersistedAppState(
+  repoId: number,
+  worktreePath: string,
+  persist: string[]
+): Promise<void> {
+  if (persist.length === 0) return
+  const files: Record<string, string> = {}
+  for (const rel of persist) {
+    const p = join(worktreePath, rel)
+    if (existsSync(p)) files[rel] = readFileSync(p).toString('base64')
+  }
+  if (Object.keys(files).length === 0) return
+  await setSecret(
+    appPersistKey(repoId),
+    JSON.stringify({ createdAt: new Date().toISOString(), files } satisfies SecretsCacheEntry)
+  )
+  const { addToGitExclude } = await import('../worktree/manager')
+  await addToGitExclude(worktreePath, Object.keys(files))
 }
 
 // ---- artifacts ----
@@ -318,6 +383,7 @@ export async function runPipeline(
 
     // app + e2e: only at full checkpoints, only when the runbook declares an app.
     if (full && rb.app) {
+      await materializePersistedAppState(repo.id, worktree.path, rb.app.persist)
       const start = await appInstances.start(repo, worktree.path, rb.app, task.id)
       record(task, sha, checkpoint, 'app', {
         status: start.ok ? 'pass' : 'fail',
@@ -329,6 +395,7 @@ export async function runPipeline(
         failure = { stage: 'app', summary: start.summary, output: start.logTail }
         return false
       }
+      await capturePersistedAppState(repo.id, worktree.path, rb.app.persist)
       try {
         const vars = {
           ports: appInstances.portsOf(start.instance.id),

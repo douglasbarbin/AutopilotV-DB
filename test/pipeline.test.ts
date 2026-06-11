@@ -149,6 +149,25 @@ describe('runPipeline', () => {
     expect(readFileSync(join(dir, 'secrets-ran.txt'), 'utf8').trim().split('\n')).toHaveLength(2)
   })
 
+  it('secrets: declared outputs are pre-deleted so inject-style tools can re-run', async () => {
+    // Simulates `op inject` without -f: refuses to overwrite an existing output.
+    const { task } = seed(
+      [
+        'secrets:',
+        '  - run: test ! -f config.json && echo fresh > config.json',
+        '    produces: [config.json]',
+        'test:',
+        '  - echo ok'
+      ].join('\n')
+    )
+    const repo = store.getRepo(task.repoId!)!
+    // A stale output from a previous run sits in the worktree.
+    writeFileSync(join(dir, 'config.json'), 'stale')
+    const r = await runPipeline(task, repo, worktreeStub(), store.getSettings(), 'draft', 's1')
+    expect(r.ok).toBe(true)
+    expect(readFileSync(join(dir, 'config.json'), 'utf8')).toContain('fresh')
+  })
+
   it('secrets failure is an error stage with a hint, and gates the pipeline', async () => {
     const { task } = seed(['secrets:', '  - run: exit 3', '    produces: [config.json]', 'test:', '  - echo ok'].join('\n'))
     const r = await runPipeline(task, store.getRepo(task.repoId!)!, worktreeStub(), store.getSettings(), 'draft', 's1')
@@ -164,6 +183,45 @@ describe('runPipeline', () => {
     expect(r.ok).toBe(true)
     expect(r.ranStages).toEqual([])
   })
+
+  it('app.persist state roams to the next worktree so the app skips re-initialization', async () => {
+    // First "worktree": the app seeds on start (creates seed.lock) — like an
+    // emulator initializer that would need `op` to seed.
+    const yaml = [
+      'test:',
+      '  - echo ok',
+      'app:',
+      '  run: sh -c "test -f seed.lock || echo seeded-now > seed.lock; echo APP-READY; sleep 30"',
+      '  persist: [seed.lock]',
+      '  ready: { logPattern: "APP-READY", timeoutSeconds: 20 }'
+    ].join('\n')
+    const { task } = seed(yaml)
+    const repo = store.getRepo(task.repoId!)!
+    await runPipeline(task, repo, worktreeStub(), store.getSettings(), 'draft', 's1')
+    expect(readFileSync(join(dir, 'seed.lock'), 'utf8')).toContain('seeded-now')
+
+    // Fresh worktree: the lock is gone locally, but is materialized from the
+    // cache BEFORE the app starts — so the app must NOT re-seed.
+    unlinkSync(join(dir, 'seed.lock'))
+    const { task: t2 } = (() => {
+      const { id } = store.upsertTask({
+        issueKey: 'PIPE-2',
+        title: 'Second task',
+        status: 'in_progress',
+        trackerStatus: 'In Progress',
+        issueType: 'Story',
+        projectKey: 'PIPE',
+        assignee: '',
+        priority: 3,
+        sprint: ''
+      })
+      store.setTaskRepo(id, repo.id)
+      return { task: store.getTask(id)! }
+    })()
+    const r2 = await runPipeline(t2, repo, worktreeStub(), store.getSettings(), 'draft', 's2')
+    expect(r2.ok).toBe(true)
+    expect(readFileSync(join(dir, 'seed.lock'), 'utf8')).toContain('seeded-now') // materialized, not re-seeded
+  }, 30_000)
 
   it('e2e advisory failures are recorded but never gate', async () => {
     // app with no ready probe: the process must just survive the grace period.

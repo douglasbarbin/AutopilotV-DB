@@ -402,7 +402,10 @@ export function registerIpc(): void {
       return { ok: false, summary: `${repo.name}'s runbook declares no app slot.` }
     }
     const { appInstances } = await import('./apps/instances')
+    const { materializePersistedAppState, capturePersistedAppState } = await import('./dev/pipeline')
+    await materializePersistedAppState(repo.id, worktree.path, resolved.runbook.app.persist)
     const r = await appInstances.start(repo, worktree.path, resolved.runbook.app, taskId)
+    if (r.ok) await capturePersistedAppState(repo.id, worktree.path, resolved.runbook.app.persist)
     pushState()
     return { ok: r.ok, summary: r.summary }
   })

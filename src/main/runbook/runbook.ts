@@ -61,6 +61,12 @@ const AppSchema = z.object({
    *  (e.g. `aspire start`, `docker compose up -d`). A clean launcher exit is
    *  then not an app death, and `teardown` is the only way to stop the app. */
   detached: z.boolean().catch(false),
+  /** Worktree-relative state files the app creates on first run that should
+   *  ROAM to future worktrees (seed locks, init markers). Cached after a
+   *  successful start and re-materialized before the next one, so
+   *  machine-global state (e.g. an already-seeded emulator volume) isn't
+   *  re-initialized — and tools like `op` aren't re-run — per worktree. */
+  persist: z.array(z.string()).catch([]),
   ready: ReadySchema.optional(),
   teardown: z.string().optional(),
   timeoutSeconds: z.number().positive().catch(600)
