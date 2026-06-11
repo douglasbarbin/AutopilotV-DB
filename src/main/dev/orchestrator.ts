@@ -222,7 +222,7 @@ export async function requestDevChanges(taskId: number, instructions: string): P
 
   const { writeAdjacentWorkFile } = await import('../worktree/manager')
   const { SIGNAL } = await import('../worktree/signals')
-  const { buildSignalInstruction } = await import('./prompt')
+  const { buildSignalInstruction, AGENTS_MERGE_UNBLOCK } = await import('./prompt')
   if (worktree && repo) {
     await writeAdjacentWorkFile(worktree.path, repo.id)
   }
@@ -234,7 +234,8 @@ export async function requestDevChanges(taskId: number, instructions: string): P
     `the existing PR. Do NOT open a new PR.\n\n` +
     buildSignalInstruction(SIGNAL.REVISE, { includePrUrl: false }) +
     `\n\n` +
-    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n` +
+    `\n${AGENTS_MERGE_UNBLOCK}\n`
 
   const sessionId = sessionManager.spawn({
     kind: 'dev',

@@ -402,6 +402,11 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
         store.setTaskAddressed(task.id, headSha, r.unresolvedThreads)
         await startAddressComments(task, repo, worktree)
       }
+    } else if (r.mergeable === false && !isTaskSessionActive(task)) {
+      // The PR conflicts with the base branch (or a half-finished merge is
+      // sitting in the worktree). Without this, the task just parks in
+      // babysitting forever. One automated resolution attempt per head commit.
+      await maybeStartConflictFix(task, repo, worktree)
     }
     return
   }
@@ -434,7 +439,7 @@ async function startAddressComments(
   const { writeAdjacentWorkFile } = await import('../worktree/manager')
   await writeAdjacentWorkFile(worktree.path, repo.id)
 
-  const { buildSignalInstruction } = await import('./prompt')
+  const { buildSignalInstruction, AGENTS_MERGE_UNBLOCK } = await import('./prompt')
   const prompt =
     `Reviewers left feedback on PR #${task.prNumber} (${repo.name}).\n` +
     `Read the unresolved review comments (e.g. \`gh pr view ${task.prNumber} --comments\`), ` +
@@ -442,7 +447,8 @@ async function startAddressComments(
     `Reply to or resolve threads where appropriate.\n\n` +
     buildSignalInstruction(SIGNAL.ADDRESS_COMMENTS, { includePrUrl: false }) +
     `\n\n` +
-    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n` +
+    `\n${AGENTS_MERGE_UNBLOCK}\n`
   const sessionId = sessionManager.spawn({
     kind: 'dev',
     workRef: `dev:${task.id}`,
@@ -455,6 +461,70 @@ async function startAddressComments(
   })
   store.attachSessionToWork('dev', task.id, sessionId)
   note('dev', `${task.issueKey}: addressing review feedback on PR #${task.prNumber}.`, { key: task.issueKey })
+}
+
+/**
+ * Spawn a session to resolve a merge conflict with the base branch. The PR is
+ * reported not-mergeable by the forge; the agent merges the base branch into
+ * the PR branch in the existing worktree, resolves, and pushes. Reuses the
+ * address-comments completion signal. Guarded to ONE attempt per head commit
+ * (the pushed merge commit changes the SHA, naturally re-arming the guard).
+ */
+async function maybeStartConflictFix(
+  task: TrackerTask,
+  repo: Repo,
+  worktree: { path: string; id: number; branch: string } | null
+): Promise<void> {
+  if (!worktree) return
+  const harness = store.getCodingHarness()
+  if (!harness) return
+  const { currentSha } = await import('./verify')
+  const sha = await currentSha(worktree.path)
+  if (!sha) return
+  const guardKey = `conflictfix:${task.id}:${sha}`
+  if (store.kvRead(guardKey)) {
+    note(
+      'dev',
+      `${task.issueKey}: PR #${task.prNumber} is still not mergeable after an automated resolution attempt at ${sha.slice(0, 7)} — holding for a human.`,
+      { key: task.issueKey },
+      'warn'
+    )
+    return
+  }
+  store.kvWrite(guardKey, new Date().toISOString())
+
+  const { writeAdjacentWorkFile } = await import('../worktree/manager')
+  await writeAdjacentWorkFile(worktree.path, repo.id)
+  const { buildSignalInstruction, AGENTS_MERGE_UNBLOCK } = await import('./prompt')
+  const prompt =
+    `PR #${task.prNumber} (${repo.name}) is NOT MERGEABLE — it conflicts with ${repo.defaultBranch}, ` +
+    `or a previous merge attempt was left half-finished in this worktree.\n\n` +
+    `In this worktree on branch ${worktree.branch}:\n` +
+    `1. If a merge is already in progress (unmerged paths, .git/MERGE_HEAD), finish or abort it first.\n` +
+    `2. If the merge is blocked by local changes to AGENTS.md, follow the unblock recipe at the end of this message.\n` +
+    `3. \`git fetch origin\` and \`git merge origin/${repo.defaultBranch}\`. Resolve every conflict faithfully ` +
+    `to BOTH sides' intent (read the surrounding code; do not blindly take one side), commit the merge, and push.\n` +
+    `Do NOT force-push and do NOT open a new PR.\n\n` +
+    buildSignalInstruction(SIGNAL.ADDRESS_COMMENTS, { includePrUrl: false }) +
+    `\n\n` +
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n` +
+    `\n${AGENTS_MERGE_UNBLOCK}\n`
+
+  const sessionId = sessionManager.spawn({
+    kind: 'dev',
+    workRef: `dev:${task.id}`,
+    harness,
+    cwd: worktree.path,
+    env: process.env,
+    worktreeId: worktree.id,
+    title: `${task.issueKey} resolve conflicts`.slice(0, 80),
+    initialInput: prompt
+  })
+  store.attachSessionToWork('dev', task.id, sessionId)
+  store.recordEvent('dev.conflict_fix_started', { taskId: task.id, prNumber: task.prNumber, sha })
+  note('dev', `${task.issueKey}: PR #${task.prNumber} conflicts with ${repo.defaultBranch} — spawned a resolution session.`, {
+    key: task.issueKey
+  }, 'warn')
 }
 
 /**
@@ -476,7 +546,7 @@ async function startVerificationFix(
   const { writeAdjacentWorkFile } = await import('../worktree/manager')
   await writeAdjacentWorkFile(worktree.path, repo.id)
 
-  const { buildSignalInstruction } = await import('./prompt')
+  const { buildSignalInstruction, AGENTS_MERGE_UNBLOCK } = await import('./prompt')
   const prompt =
     `Automated verification FAILED for PR #${task.prNumber} (${repo.name}) before it could be marked ready to merge.\n\n` +
     `Verification output:\n${failureSummary.slice(0, 3000)}\n\n` +
@@ -484,7 +554,8 @@ async function startVerificationFix(
     `Do NOT open a new PR.\n\n` +
     buildSignalInstruction(SIGNAL.ADDRESS_COMMENTS, { includePrUrl: false }) +
     `\n\n` +
-    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
+    `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n` +
+    `\n${AGENTS_MERGE_UNBLOCK}\n`
 
   const sessionId = sessionManager.spawn({
     kind: 'dev',

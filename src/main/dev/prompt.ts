@@ -5,6 +5,21 @@ export { SIGNAL }
 export const PR_URL_FILE = SIGNAL.IMPL
 
 /**
+ * Appended to every spawned session prompt. The injected block in a TRACKED
+ * AGENTS.md is protected with git skip-worktree, and git refuses to start any
+ * merge/rebase that touches a locally-modified file — so agents must know the
+ * unprotect → merge → reapply dance instead of getting wedged on
+ * "Your local changes would be overwritten by merge".
+ */
+export const AGENTS_MERGE_UNBLOCK =
+  'If git refuses a merge/rebase/checkout because of local changes to AGENTS.md (it carries an injected block between the TASKMAN:BEGIN/TASKMAN:END markers, protected with skip-worktree), unblock it like this:\n' +
+  '1. Save the injected block: `cp AGENTS.md /tmp/AGENTS.injected.md`\n' +
+  '2. Unprotect and restore: `git update-index --no-skip-worktree AGENTS.md && git checkout -- AGENTS.md`\n' +
+  '3. Complete the merge/rebase.\n' +
+  '4. Reapply: append the saved block (everything from `<!-- TASKMAN:BEGIN` through `TASKMAN:END -->` in /tmp/AGENTS.injected.md) back onto AGENTS.md, then re-protect: `git update-index --skip-worktree AGENTS.md`\n' +
+  'Never commit the injected block.'
+
+/**
  * Completion-signal instruction shared by every dev-phase prompt. Asks for the
  * v2 JSON report (summary, follow-ups, learnings) but spells out the degraded
  * fallback — orchestration must advance even when an agent can't or won't
@@ -80,9 +95,11 @@ export function buildDevStartPrompt(input: DevStartPromptInput): string {
     `Base branch (target of your PR): ${baseBranch}`,
     `Repository: ${repoName}`,
     '',
-    'Coding standards for this run have been injected into ./AGENTS.md in the worktree root (git-ignored, do not commit it). Read it before you start.',
+    'Coding standards for this run have been injected into ./AGENTS.md in the worktree root (git-ignored/skip-worktree, do not commit the injected block). Read it before you start.',
     '',
-    'If a RUNBOOK.md exists in the worktree root, read it before building, running, or testing — it explains how to get THIS repo to a runnable state (setup, secrets, app startup). Never run secrets-manager commands (e.g. `op`) yourself; the orchestrator materializes any required config files before you start.',
+    AGENTS_MERGE_UNBLOCK,
+    '',
+    'If a RUNBOOK.md (or RUNBOOK.autopilotv.md — the operator override, which wins) exists in the worktree root, read it before building, running, or testing — it explains how to get THIS repo to a runnable state (setup, secrets, app startup). Never run secrets-manager commands (e.g. `op`) yourself; the orchestrator materializes any required config files before you start.',
     '',
     `Implement the change on \`${branch}\`, commit, and open a DRAFT pull request against \`${baseBranch}\` with:`,
     '',

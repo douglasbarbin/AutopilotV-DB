@@ -11,9 +11,17 @@ const AGENTS_END = '<!-- TASKMAN:END -->'
 
 /**
  * Inject the configured agent-instructions template at the bottom of the
- * worktree's AGENTS.md (creating it if absent), and arrange for the change to be
- * ignored by git so it is never committed. Idempotent: re-injection replaces the
- * previously injected block. Called before any agent is handed the worktree.
+ * worktree's AGENTS.md (creating it if absent), and arrange for the change to
+ * be ignored by git so it is never committed. Idempotent: re-injection
+ * replaces the previously injected block. Called before any agent is handed
+ * the worktree.
+ *
+ * Tracked AGENTS.md note: the local modification is protected with
+ * skip-worktree, which means any `git merge`/`rebase` that touches AGENTS.md
+ * refuses to start ("Your local changes would be overwritten"). That is a git
+ * invariant — every spawned session's prompt therefore carries the
+ * unprotect → merge → reapply recipe (AGENTS_MERGE_UNBLOCK in dev/prompt.ts),
+ * and the conflict-fix session dispatched for unmergeable PRs leads with it.
  */
 export async function injectAgentsTemplate(worktreePath: string, content: string): Promise<void> {
   const trimmed = content.trim()
@@ -35,17 +43,7 @@ export async function injectAgentsTemplate(worktreePath: string, content: string
     await exec('git', ['-C', worktreePath, 'update-index', '--skip-worktree', 'AGENTS.md'])
   } else {
     // New file: add to this worktree's exclude so `git add -A` won't stage it.
-    const gp = (
-      await exec('git', ['-C', worktreePath, 'rev-parse', '--git-path', 'info/exclude'])
-    ).stdout.trim()
-    const exPath = gp ? (isAbsolute(gp) ? gp : join(worktreePath, gp)) : ''
-    if (exPath) {
-      const cur = existsSync(exPath) ? readFileSync(exPath, 'utf8') : ''
-      if (!cur.split('\n').includes('AGENTS.md')) {
-        mkdirSync(dirname(exPath), { recursive: true })
-        writeFileSync(exPath, cur + (cur && !cur.endsWith('\n') ? '\n' : '') + 'AGENTS.md\n')
-      }
-    }
+    await addToGitExclude(worktreePath, ['AGENTS.md'])
   }
   log.info('injected AGENTS.md template', { worktreePath, tracked })
 }
@@ -88,8 +86,12 @@ export async function writeRunbookOverride(worktreePath: string, repo: Repo): Pr
     const { resolveRunbook, RUNBOOK_FILENAME } = await import('../runbook/runbook')
     const resolved = resolveRunbook(repo)
     if (resolved.source !== 'override' || !resolved.narrative) return
-    writeFileSync(join(worktreePath, RUNBOOK_FILENAME), resolved.narrative)
-    await addToGitExclude(worktreePath, [RUNBOOK_FILENAME])
+    // Same rule as AGENTS.md: never write over a committed RUNBOOK.md — local
+    // changes to tracked files block agent-initiated merges. The override gets
+    // a git-excluded companion name instead.
+    const target = existsSync(join(worktreePath, RUNBOOK_FILENAME)) ? 'RUNBOOK.autopilotv.md' : RUNBOOK_FILENAME
+    writeFileSync(join(worktreePath, target), resolved.narrative)
+    await addToGitExclude(worktreePath, [target])
   } catch (err) {
     log.warn('failed to write runbook override', { err: String(err) })
   }

@@ -138,10 +138,34 @@ describe('address-comments loop prevention', () => {
     expect(spawnSpy).toHaveBeenCalledTimes(2)
   })
 
-  it('does not spawn at all when there is no feedback', async () => {
+  it('does not spawn at all when there is no feedback and the PR is mergeable', async () => {
     const id = seedReviewTask()
-    readiness = { ...readiness, changesRequested: false, unresolvedThreads: 0 }
+    // statusOk stays false so the gates are unsatisfied without any feedback;
+    // mergeable so the conflict-dispatch path stays quiet too.
+    readiness = { ...readiness, changesRequested: false, unresolvedThreads: 0, mergeable: true }
     await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
     expect(spawnSpy).not.toHaveBeenCalled()
+  })
+
+  it('dispatches ONE conflict-resolution session when the PR is not mergeable', async () => {
+    const id = seedReviewTask()
+    readiness = { ...readiness, changesRequested: false, unresolvedThreads: 0, mergeable: false }
+
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+    const opts = spawnSpy.mock.calls[0][0] as { initialInput?: string; title: string }
+    expect(opts.title).toContain('resolve conflicts')
+    expect(opts.initialInput).toContain('NOT MERGEABLE')
+
+    // Same head commit → the once-per-sha guard holds (no session spam).
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(1)
+
+    // A new commit (e.g. the pushed merge) re-arms exactly one more attempt.
+    wf(join(repoDir, 'a.txt'), 'two')
+    git(repoDir, 'commit', '-qam', 'merge main')
+    await ADVANCE_FNS.in_review(store.getTask(id)!, store.getSettings())
+    expect(spawnSpy).toHaveBeenCalledTimes(2)
   })
 })

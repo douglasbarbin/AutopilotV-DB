@@ -44,4 +44,54 @@ describe('injectAgentsTemplate', () => {
     const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()
     expect(status).not.toContain('AGENTS.md')
   })
+
+  it('appends to a COMMITTED AGENTS.md under skip-worktree, keeping the tree clean', async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir })
+    git('config', 'user.email', 't@t')
+    git('config', 'user.name', 't')
+    writeFileSync(join(dir, 'AGENTS.md'), '# Repo-owned rules\n')
+    git('add', 'AGENTS.md')
+    git('commit', '-qm', 'add agents')
+
+    await injectAgentsTemplate(dir, TEMPLATE)
+
+    const out = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(out).toContain('# Repo-owned rules')
+    expect(out).toContain('be excellent') // harness auto-read sees the standards
+    const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()
+    expect(status.trim()).toBe('') // skip-worktree hides the modification
+  })
+
+  it('the unblock recipe we give agents actually completes a blocked merge', async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir })
+    git('config', 'user.email', 't@t')
+    git('config', 'user.name', 't')
+    git('checkout', '-qb', 'main')
+    writeFileSync(join(dir, 'AGENTS.md'), '# Repo-owned rules v1\n')
+    git('add', 'AGENTS.md')
+    git('commit', '-qm', 'v1')
+    writeFileSync(join(dir, 'AGENTS.md'), '# Repo-owned rules v2\n')
+    git('commit', '-qam', 'v2')
+    // Feature branch from BEFORE main's AGENTS.md change, then inject.
+    git('checkout', '-qb', 'feature', 'HEAD~1')
+    await injectAgentsTemplate(dir, TEMPLATE)
+
+    // The known git invariant: the skip-worktree'd local change blocks the merge.
+    expect(() => git('merge', 'main')).toThrow()
+
+    // AGENTS_MERGE_UNBLOCK recipe, exactly as prompted:
+    const saved = readFileSync(join(dir, 'AGENTS.md'), 'utf8') // 1. save
+    git('update-index', '--no-skip-worktree', 'AGENTS.md') // 2. unprotect
+    git('checkout', '--', 'AGENTS.md')
+    git('merge', 'main') // 3. merge completes
+    const block = saved.slice(saved.indexOf('<!-- TASKMAN:BEGIN')) // 4. reapply
+    writeFileSync(join(dir, 'AGENTS.md'), readFileSync(join(dir, 'AGENTS.md'), 'utf8') + '\n' + block)
+    git('update-index', '--skip-worktree', 'AGENTS.md')
+
+    const out = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(out).toContain('v2') // merged content
+    expect(out).toContain('be excellent') // injected block reapplied
+    const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()
+    expect(status.trim()).toBe('') // re-protected
+  })
 })
