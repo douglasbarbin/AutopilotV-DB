@@ -190,6 +190,12 @@ app.on('before-quit', async (e) => {
   // Release leases for any unfinished work owned by live sessions.
   store.reclaimExpiredLeases()
   await sessionManager.killAll('app_quit')
+  try {
+    const { appInstances } = await import('./apps/instances')
+    await appInstances.stopAll('app_quit')
+  } catch {
+    /* nothing running */
+  }
   stopLocalModels()
   destroyTray()
   closeDb()

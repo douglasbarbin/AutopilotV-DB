@@ -416,6 +416,23 @@ stale items) so the set stays signal rather than noise.
 **Settings.** `autoPublish` (default off → awaits your Publish), `requiredApprovals`
 (default 1).
 
+**Runbooks & staged verification.** A repo's `RUNBOOK.md` (or a Settings
+override; legacy `verify_command` as fallback) declares optional lifecycle
+slots: `setup` (cached on declared input files), `secrets` (run once, outputs
+encrypted+cached, re-materialized per worktree — e.g. 1Password `op inject`),
+`build`, `test`, `app` (run + readiness probe + teardown, opt-in `{port:name}`
+allocation), and `e2e` (per-step `gate: blocking|advisory`, artifact capture).
+Verification runs the `test` slot per pushed commit and the FULL pipeline at
+two checkpoints: when the PR reaches **draft** (the change is proven runnable
+before a human looks) and at the **ready_to_merge gate** (skipped when the
+draft checkpoint already proved the same SHA). Each stage records a
+`task_verifications` row (`checkpoint` column); failures spawn the
+verification-fix session. The runbook is read from the TRUNK clone, never the
+task worktree, so a branch under test cannot weaken its own verification.
+App instances are supervised in-process (one per repo unless the runbook
+declares `auto` ports; global `maxRunningApps` cap) and surfaced in the UI
+with logs and one-click stop.
+
 ---
 
 ## 10. Data model (SQLite)

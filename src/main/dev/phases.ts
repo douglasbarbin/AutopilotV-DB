@@ -173,10 +173,69 @@ export async function advanceRevising(task: TrackerTask, settings: Settings): Pr
 }
 
 /**
+ * Draft checkpoint: as soon as a draft PR exists, prove the change RUNNABLE
+ * with the full runbook pipeline (setup → secrets → build → test → app+e2e)
+ * before a human looks at it. A failure spawns a verification-fix session and
+ * holds auto-publish; a new pushed commit re-runs the checkpoint. Repos
+ * without runbook stages skip this (the merge gate's legacy command covers
+ * them).
+ *
+ * Returns true when the draft is proven (or the checkpoint doesn't apply).
+ */
+async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promise<boolean> {
+  if (!settings.verifyBeforeReady || !task.prNumber || !task.repoId || !task.worktreeId) return true
+  const repo = store.getRepo(task.repoId)
+  const worktree = store.getWorktree(task.worktreeId)
+  if (!repo || !worktree || worktree.prunedAt) return true
+
+  const { hasRunbookStages, runPipeline } = await import('./pipeline')
+  if (!hasRunbookStages(repo)) return true
+
+  // A verification-fix session signals completion with the address-comments
+  // signal; in the draft phase we consume it here.
+  if (worktree.path && isSignalled(worktree.path, SIGNAL.ADDRESS_COMMENTS)) {
+    const consumed = consumeReport(worktree.path, SIGNAL.ADDRESS_COMMENTS)
+    if (consumed) await recordSignalReport(task, 'address_comments', consumed)
+    killTaskSessionIfLive(task, 'verification fix complete')
+  }
+  if (isTaskSessionActive(task)) return false // fix session still working
+
+  const { currentSha } = await import('./verify')
+  const sha = await currentSha(worktree.path)
+  if (!sha) return true
+
+  const existing = store.getPipelineVerdict(task.id, 'draft', sha)
+  if (existing) {
+    // 'error' rollups (e.g. invalid runbook) surface but never block.
+    return existing.status !== 'fail'
+  }
+
+  const r = await runPipeline(task, repo, worktree, settings, 'draft', sha)
+  if (r.ok) {
+    note('dev', `${task.issueKey}: draft checkpoint passed — change proven runnable at ${sha.slice(0, 7)}.`, {
+      key: task.issueKey
+    })
+    return true
+  }
+  await startVerificationFix(task, repo, worktree, r.failureSummary ?? 'Pipeline failed.')
+  notifier.notify({
+    kind: 'needs_human',
+    title: `Draft verification failed — ${task.issueKey}`,
+    body: `PR #${task.prNumber} failed the runbook pipeline at draft. Auto-fixing.`,
+    deepLink: { type: 'task', id: task.id }
+  })
+  return false
+}
+
+/**
  * draft → in_review (auto-publish if `settings.autoPublish`, else wait for the
- * user's Publish click from the UI).
+ * user's Publish click from the UI). The draft checkpoint runs first either
+ * way; auto-publish is held until the change is proven runnable. (A manual
+ * Publish click remains an explicit human override.)
  */
 export async function advanceDraft(task: TrackerTask, settings: Settings): Promise<void> {
+  const proven = await runDraftCheckpoint(task, settings)
+  if (!proven) return
   if (!settings.autoPublish) return
   if (!task.prNumber) return
   const repo = task.repoId ? store.getRepo(task.repoId) : null
@@ -412,6 +471,12 @@ async function startVerificationFix(
 export async function finishMerged(task: TrackerTask): Promise<void> {
   if (task.sessionId && sessionManager.isLive(task.sessionId)) {
     sessionManager.kill(task.sessionId, 'pr merged')
+  }
+  try {
+    const { appInstances } = await import('../apps/instances')
+    await appInstances.stopForTask(task.id, 'task merged')
+  } catch {
+    /* no instances module loaded — nothing running */
   }
   try {
     const { runPostMergeAnalysis } = await import('../analysis/engine')

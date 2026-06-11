@@ -52,6 +52,12 @@ export const Channels = {
   followupSetStatus: 'followup.setStatus',
   followupCreateStory: 'followup.createStory',
   knowledgeSetStatus: 'knowledge.setStatus',
+  repoSetRunbook: 'repo.setRunbook',
+  runbookValidate: 'runbook.validate',
+  repoRefreshSecrets: 'repo.refreshSecrets',
+  appInstanceStop: 'appInstance.stop',
+  appInstanceStart: 'appInstance.start',
+  appInstanceLogs: 'appInstance.logs',
   // streams (main -> renderer, send)
   evtState: 'evt.state',
   evtSessionOutput: 'evt.sessionOutput',
@@ -112,6 +118,7 @@ export type StateSlice =
   | 'brainNotes'
   | 'followups'
   | 'knowledge'
+  | 'appInstances'
   | 'brain'
 
 /**
@@ -173,6 +180,15 @@ export interface AutopilotVApi {
   /** Create a tracker story from a follow-up (human-gated). */
   createStoryFromFollowUp(id: number): Promise<{ key: string; url?: string }>
   setKnowledgeStatus(id: number, status: KnowledgeStatus): Promise<void>
+  setRepoRunbook(repoId: number, runbook: string): Promise<void>
+  /** Validate runbook markdown: parse the yaml block, report stages or the error. */
+  validateRunbook(text: string): Promise<{ ok: boolean; error?: string; stages: string[] }>
+  /** Drop a repo's cached secrets so the next pipeline run refreshes them. */
+  refreshRepoSecrets(repoId: number): Promise<number>
+  stopAppInstance(id: string): Promise<void>
+  /** Manually start a task's app per its repo runbook. */
+  startAppForTask(taskId: number): Promise<{ ok: boolean; summary: string }>
+  getAppInstanceLogs(id: string): Promise<string>
   // subscriptions return an unsubscribe fn
   onState(cb: (state: AppState) => void): () => void
   /**

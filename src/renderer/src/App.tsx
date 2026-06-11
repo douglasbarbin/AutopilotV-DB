@@ -6,6 +6,7 @@ import { WorkQueue } from './components/WorkQueue'
 import { SessionGrid } from './components/SessionGrid'
 import { ReviewCards } from './components/ReviewCards'
 import { BacklogInsights } from './components/BacklogInsights'
+import { RunningApps } from './components/RunningApps'
 import { SettingsPanel } from './components/SettingsPanel'
 import { EventsLog } from './components/EventsLog'
 import { BrainPanel } from './components/BrainPanel'
@@ -188,7 +189,12 @@ export function App() {
 
         <main className="page">
           {tab === 'work' && <WorkQueue state={state} />}
-          {tab === 'sessions' && <SessionGrid sessions={state.sessions} theme={state.settings.theme} />}
+          {tab === 'sessions' && (
+            <>
+              <RunningApps state={state} />
+              <SessionGrid sessions={state.sessions} theme={state.settings.theme} />
+            </>
+          )}
           {tab === 'reviews' && <ReviewCards state={state} />}
           {tab === 'insights' && <BacklogInsights state={state} />}
           {tab === 'brain' && <BrainPanel state={state} />}

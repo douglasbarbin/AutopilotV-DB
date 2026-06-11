@@ -69,6 +69,16 @@ const api: AutopilotVApi = {
     ipcRenderer.invoke(Channels.followupCreateStory, id) as Promise<{ key: string; url?: string }>,
   setKnowledgeStatus: (id, status) =>
     ipcRenderer.invoke(Channels.knowledgeSetStatus, id, status) as Promise<void>,
+  setRepoRunbook: (repoId, runbook) =>
+    ipcRenderer.invoke(Channels.repoSetRunbook, repoId, runbook) as Promise<void>,
+  validateRunbook: (text) =>
+    ipcRenderer.invoke(Channels.runbookValidate, text) as Promise<{ ok: boolean; error?: string; stages: string[] }>,
+  refreshRepoSecrets: (repoId) =>
+    ipcRenderer.invoke(Channels.repoRefreshSecrets, repoId) as Promise<number>,
+  stopAppInstance: (id) => ipcRenderer.invoke(Channels.appInstanceStop, id) as Promise<void>,
+  startAppForTask: (taskId) =>
+    ipcRenderer.invoke(Channels.appInstanceStart, taskId) as Promise<{ ok: boolean; summary: string }>,
+  getAppInstanceLogs: (id) => ipcRenderer.invoke(Channels.appInstanceLogs, id) as Promise<string>,
   onState: (cb: (state: AppState) => void) => {
     const fn = (_e: unknown, state: AppState) => cb(state)
     ipcRenderer.on(Channels.evtState, fn)

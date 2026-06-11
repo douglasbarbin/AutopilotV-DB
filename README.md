@@ -75,6 +75,24 @@ instead of typing prompts.
   `.autopilotv-revise`, `.autopilotv-address-comments`; the legacy bare-file
   names still work). Signals carry structured reports — summary, follow-up work
   items, learned knowledge — that feed the post-implementation analysis engine.
+- **Runbooks: per-repo "init to runnable" as data.** A `RUNBOOK.md` (committed
+  in the repo, or pasted as an override in Settings) holds a plain-English
+  narrative for agents plus optional yaml lifecycle slots — setup / secrets /
+  build / test / app / e2e — all operator-defined shell. AutopilotV supplies the
+  slots, opt-in port allocation, readiness waiting, caching, and evidence
+  collection; it has no opinion about what runs inside them.
+- **Staged verification with checkpoints.** Cheap test runs per pushed commit;
+  the FULL pipeline (including booting the app and running e2e, e.g. Cypress)
+  proves the change runnable when the PR reaches draft and again at the
+  ready-to-merge gate. Per-stage verdicts and artifacts (screenshots, videos)
+  are recorded as evidence; failures auto-spawn a fix session.
+- **Secrets caching.** Runbook secrets steps (e.g. 1Password `op inject`) run
+  once against your unlocked session; the produced config files are encrypted
+  with the OS keychain and re-materialized into every worktree from cache —
+  agents and repeat verifications never touch the secrets tool.
+- **Running apps registry.** Apps started from runbooks (verification or a
+  manual run) are supervised: allocated ports, readiness probes, log capture,
+  one-click stop, and clean teardown — multiple projects side by side.
 - **A PM loop.** Merged work is analyzed (agent reports, PR conversation, TODOs
   the diff introduced, verification history) into follow-up story candidates and
   learned repo conventions. The **Backlog & Insights** pane turns follow-ups

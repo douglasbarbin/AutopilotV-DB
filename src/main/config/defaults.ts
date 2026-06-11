@@ -51,6 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
   verifyBeforeReady: true,
   verifySpecConformance: true,
   verifyTimeoutSeconds: 600,
+  maxRunningApps: 2,
   branchPrefix: 'autopilotv/',
   terminalCommand: '',
   theme: 'tomorrow-night-80s',

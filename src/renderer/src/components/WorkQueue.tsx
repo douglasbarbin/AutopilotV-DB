@@ -127,10 +127,23 @@ function ReviewRow({ p }: { p: PrReview }) {
   )
 }
 
+const STAGE_ORDER: TaskVerification['kind'][] = ['setup', 'secrets', 'build', 'test', 'app', 'e2e']
+const STAGE_MARK: Record<TaskVerification['status'], string> = {
+  pass: '✓',
+  fail: '✗',
+  error: '⚠',
+  skipped: '–'
+}
+
 function VerifyBadge({ verifications }: { verifications: TaskVerification[] }) {
   const cmd = verifications.find((v) => v.kind === 'command')
   const spec = verifications.find((v) => v.kind === 'spec')
-  if (!cmd && !spec) return null
+  const pipeline = verifications.find((v) => v.kind === 'pipeline')
+  const stages = STAGE_ORDER.map((k) => verifications.find((v) => v.kind === k)).filter(
+    (v): v is TaskVerification => !!v
+  )
+
+  if (!cmd && !spec && !pipeline && stages.length === 0) return null
   const label: Record<TaskVerification['status'], string> = {
     pass: '✓ verified',
     fail: '✗ verify failed',
@@ -139,7 +152,20 @@ function VerifyBadge({ verifications }: { verifications: TaskVerification[] }) {
   }
   return (
     <>
-      {cmd && (
+      {/* Staged pipeline: one chip per stage, latest verdict each. */}
+      {stages.map((v) => (
+        <span
+          key={v.kind}
+          className="state-tag"
+          style={{ color: VERIFY_COLOR[v.status] }}
+          title={`[${v.checkpoint}] ${v.summary}`}
+        >
+          {' · '}
+          {STAGE_MARK[v.status]} {v.kind}
+        </span>
+      ))}
+      {/* Legacy single command verdict (repos without runbook stages). */}
+      {stages.length === 0 && cmd && (
         <span className="state-tag" style={{ color: VERIFY_COLOR[cmd.status] }} title={cmd.summary}>
           {' · '}
           {label[cmd.status]}

@@ -9,6 +9,7 @@ import type { Settings } from '../src/shared/types/domain'
 const SETTINGS: Settings = {
   pollIntervalSeconds: 60,
   maxConcurrentSessions: 3,
+  maxRunningApps: 2,
   cloneParentDir: '/tmp/repos',
   tracker: 'jira',
   trackerConfig: {},

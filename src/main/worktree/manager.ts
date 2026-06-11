@@ -78,6 +78,23 @@ export function buildAgentsContent(repoId: number, role: 'coding' | 'review'): s
   )
 }
 
+/**
+ * When the repo's runbook comes from the operator OVERRIDE (not a committed
+ * RUNBOOK.md), materialize it into the worktree (git-excluded) so agents can
+ * read the same instructions the orchestrator executes.
+ */
+export async function writeRunbookOverride(worktreePath: string, repo: Repo): Promise<void> {
+  try {
+    const { resolveRunbook, RUNBOOK_FILENAME } = await import('../runbook/runbook')
+    const resolved = resolveRunbook(repo)
+    if (resolved.source !== 'override' || !resolved.narrative) return
+    writeFileSync(join(worktreePath, RUNBOOK_FILENAME), resolved.narrative)
+    await addToGitExclude(worktreePath, [RUNBOOK_FILENAME])
+  } catch (err) {
+    log.warn('failed to write runbook override', { err: String(err) })
+  }
+}
+
 /** Generate and write ADJACENT_WORK.md in the worktree root. */
 export async function writeAdjacentWorkFile(worktreePath: string, repoId: number): Promise<void> {
   try {
@@ -214,6 +231,7 @@ export async function provisionDevWorktree(repo: Repo, branch: string): Promise<
   })
   await injectAgentsTemplate(dest, buildAgentsContent(repo.id, 'coding'))
   await addToGitExclude(dest, ALL_SIGNALS)
+  await writeRunbookOverride(dest, repo)
   await writeAdjacentWorkFile(dest, repo.id)
   const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
   store.recordEvent('worktree.provisioned', { repo: repo.name, branch, path: dest })
@@ -249,6 +267,7 @@ export async function provisionDevWorktreeForBranch(repo: Repo, branch: string):
   })
   await injectAgentsTemplate(dest, buildAgentsContent(repo.id, 'coding'))
   await addToGitExclude(dest, ALL_SIGNALS)
+  await writeRunbookOverride(dest, repo)
   await writeAdjacentWorkFile(dest, repo.id)
   const id = store.createWorktree({ path: dest, repoId: repo.id, branch, kind: 'dev', sessionId: null })
   store.recordEvent('worktree.provisioned', { repo: repo.name, branch, path: dest, adopted: true })

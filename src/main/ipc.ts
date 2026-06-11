@@ -351,6 +351,67 @@ export function registerIpc(): void {
     pushState()
   })
 
+  // ---- runbooks + app instances ----
+
+  handle(Channels.repoSetRunbook, async (repoId: number, runbook: string) => {
+    store.setRepoRunbook(repoId, runbook)
+    store.recordEvent('repo.runbook_set', { repoId, bytes: runbook.length })
+    pushState()
+  })
+
+  handle(Channels.runbookValidate, async (text: string) => {
+    const { parseRunbookDoc, isEmptyRunbook } = await import('./runbook/runbook')
+    const { runbook, error } = parseRunbookDoc(text)
+    if (error) return { ok: false, error, stages: [] }
+    if (!runbook || isEmptyRunbook(runbook)) {
+      return { ok: true, stages: [] } // pure narrative — valid, no executable stages
+    }
+    const stages: string[] = []
+    if (runbook.setup.length) stages.push('setup')
+    if (runbook.secrets.length) stages.push('secrets')
+    if (runbook.build.length) stages.push('build')
+    if (runbook.test.length) stages.push('test')
+    if (runbook.app) stages.push('app')
+    if (runbook.e2e.length) stages.push('e2e')
+    return { ok: true, stages }
+  })
+
+  handle(Channels.repoRefreshSecrets, async (repoId: number) => {
+    const { clearSecretsCache } = await import('./dev/pipeline')
+    const n = await clearSecretsCache(repoId)
+    store.recordEvent('repo.secrets_refreshed', { repoId, cleared: n })
+    return n
+  })
+
+  handle(Channels.appInstanceStop, async (id: string) => {
+    const { appInstances } = await import('./apps/instances')
+    await appInstances.stop(id, 'stopped by user')
+    pushState()
+  })
+
+  handle(Channels.appInstanceStart, async (taskId: number) => {
+    const task = store.getTask(taskId)
+    const repo = task?.repoId ? store.getRepo(task.repoId) : null
+    const worktree = task?.worktreeId ? store.getWorktree(task.worktreeId) : null
+    if (!task || !repo || !worktree || worktree.prunedAt) {
+      return { ok: false, summary: 'Task has no live worktree to run in.' }
+    }
+    const { resolveRunbook } = await import('./runbook/runbook')
+    const resolved = resolveRunbook(repo)
+    if (!resolved.runbook.app) {
+      return { ok: false, summary: `${repo.name}'s runbook declares no app slot.` }
+    }
+    const { appInstances } = await import('./apps/instances')
+    const r = await appInstances.start(repo, worktree.path, resolved.runbook.app, taskId)
+    pushState()
+    return { ok: r.ok, summary: r.summary }
+  })
+
+  handle(Channels.appInstanceLogs, async (id: string) => {
+    const { appInstances } = await import('./apps/instances')
+    return appInstances.logTail(id, 20_000)
+  })
+
   // ---- main -> renderer wiring ----
   sessionManager.on('output', (chunk) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -359,6 +420,7 @@ export function registerIpc(): void {
   })
   sessionManager.on('status', () => pushState())
   brain.on('changed', () => pushState())
+  void import('./apps/instances').then(({ appInstances }) => appInstances.on('changed', () => pushState()))
   notifier.on('notification', (n: NotificationPayload) => {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(Channels.evtNotification, n)

@@ -30,7 +30,7 @@ export {
 
 export { seedIfEmpty, listHarnesses, getHarness, getReviewHarness, getBrainHarness, getCodingHarness, upsertHarness, deleteHarness, normalizeReviewDefault } from './harnesses'
 
-export { listRepos, getRepo, getRepoByName, upsertRepo, setRepoCloneState, setRepoVerifyCommand, resolveProjectRepo } from './repos'
+export { listRepos, getRepo, getRepoByName, upsertRepo, setRepoCloneState, setRepoVerifyCommand, setRepoRunbook, resolveProjectRepo } from './repos'
 
 export {
   upsertTask,
@@ -82,7 +82,7 @@ export { claimWork, setClaimState, attachSessionToWork, renewLease, releaseLease
 
 export { recordEvent, listEvents, recordBrainNote, listBrainNotes } from './events'
 
-export { insertVerification, listVerificationsForTask, listRecentVerifications } from './verifications'
+export { insertVerification, listVerificationsForTask, listRecentVerifications, getPipelineVerdict } from './verifications'
 
 export {
   insertFollowUp,

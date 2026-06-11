@@ -296,6 +296,12 @@ export async function resetDevTask(taskId: number, eventKind = 'dev.reset'): Pro
   if (task?.sessionId && sessionManager.isLive(task.sessionId)) {
     sessionManager.kill(task.sessionId, 'dev reset')
   }
+  try {
+    const { appInstances } = await import('../apps/instances')
+    await appInstances.stopForTask(taskId, 'dev reset')
+  } catch {
+    /* nothing running */
+  }
   if (task?.worktreeId) {
     const wt = store.getWorktree(task.worktreeId)
     if (wt && !wt.prunedAt) await discardWorktree(wt)

@@ -146,25 +146,61 @@ export async function verifyTaskForMerge(
     return { ok: true } // couldn't read HEAD; don't deadlock the task
   }
 
-  // Already verified this exact commit: return the cached command verdict.
+  // Already verified this exact commit: return the cached verdict.
   if (sha === task.verifiedSha) {
     const last = store
       .listVerificationsForTask(task.id)
-      .find((v) => v.kind === 'command' && v.commitSha === sha)
+      .find((v) => (v.kind === 'command' || v.kind === 'pipeline') && v.commitSha === sha)
     return { ok: !last || last.status !== 'fail' }
   }
 
-  // Fresh commit → run the command verification (gating) + spec check (advisory).
-  const cmd = await runCommandVerification(repo, worktree, settings)
-  store.insertVerification({
-    taskId: task.id,
-    prNumber: task.prNumber,
-    commitSha: sha,
-    kind: 'command',
-    status: cmd.status,
-    summary: cmd.summary,
-    detail: cmd.detail
-  })
+  // Fresh commit → gating verification + spec check (advisory). When the repo
+  // declares runbook stages, the staged pipeline replaces the single command;
+  // the merge gate skips the full pipeline when the draft checkpoint already
+  // proved this exact SHA.
+  let gate: MergeVerificationResult
+  const { runPipeline, hasRunbookStages } = await import('./pipeline')
+  if (hasRunbookStages(repo)) {
+    const draftPass = store.getPipelineVerdict(task.id, 'draft', sha)
+    if (draftPass?.status === 'pass') {
+      store.insertVerification({
+        taskId: task.id,
+        prNumber: task.prNumber,
+        commitSha: sha,
+        kind: 'pipeline',
+        status: 'pass',
+        summary: 'proven at the draft checkpoint (same commit) — full pipeline not re-run',
+        detail: { via: 'draft' },
+        checkpoint: 'merge_gate'
+      })
+      gate = { ok: true }
+    } else {
+      const r = await runPipeline(task, repo, worktree, settings, 'merge_gate', sha)
+      gate = { ok: r.ok, failureSummary: r.failureSummary }
+    }
+  } else {
+    const cmd = await runCommandVerification(repo, worktree, settings)
+    store.insertVerification({
+      taskId: task.id,
+      prNumber: task.prNumber,
+      commitSha: sha,
+      kind: 'command',
+      status: cmd.status,
+      summary: cmd.summary,
+      detail: cmd.detail,
+      checkpoint: 'merge_gate'
+    })
+    if (cmd.status === 'fail') {
+      store.recordEvent('dev.verify_failed', { taskId: task.id, prNumber: task.prNumber, sha }, { level: 'warn' })
+      log.warn('verification failed', { taskId: task.id, summary: cmd.summary })
+      gate = {
+        ok: false,
+        failureSummary: `${cmd.summary}\n\n${String((cmd.detail as { output?: string }).output ?? '').slice(-2000)}`
+      }
+    } else {
+      gate = { ok: true }
+    }
+  }
 
   if (settings.verifySpecConformance) {
     const spec = await runSpecConformance(task, repo, settings)
@@ -175,16 +211,11 @@ export async function verifyTaskForMerge(
       kind: 'spec',
       status: spec.status,
       summary: spec.summary,
-      detail: spec.detail
+      detail: spec.detail,
+      checkpoint: 'merge_gate'
     })
   }
 
   store.setTaskVerifiedSha(task.id, sha)
-
-  if (cmd.status === 'fail') {
-    store.recordEvent('dev.verify_failed', { taskId: task.id, prNumber: task.prNumber, sha }, { level: 'warn' })
-    log.warn('verification failed', { taskId: task.id, summary: cmd.summary })
-    return { ok: false, failureSummary: `${cmd.summary}\n\n${String((cmd.detail as { output?: string }).output ?? '').slice(-2000)}` }
-  }
-  return { ok: true }
+  return gate
 }

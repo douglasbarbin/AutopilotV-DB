@@ -15,6 +15,7 @@ interface VerificationRow {
   status: TaskVerification['status']
   summary: string
   detail_json: string
+  checkpoint: TaskVerification['checkpoint']
   created_at: string
 }
 
@@ -34,6 +35,7 @@ function rowToVerification(r: VerificationRow): TaskVerification {
     status: r.status,
     summary: r.summary,
     detail,
+    checkpoint: r.checkpoint ?? 'commit',
     createdAt: r.created_at
   }
 }
@@ -46,14 +48,40 @@ export function insertVerification(v: {
   status: TaskVerification['status']
   summary: string
   detail?: Record<string, unknown>
+  checkpoint?: TaskVerification['checkpoint']
 }): number {
   const info = getDb()
     .prepare(
-      `INSERT INTO task_verifications (task_id, pr_number, commit_sha, kind, status, summary, detail_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO task_verifications (task_id, pr_number, commit_sha, kind, status, summary, detail_json, checkpoint)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(v.taskId, v.prNumber, v.commitSha, v.kind, v.status, v.summary, JSON.stringify(v.detail ?? {}))
+    .run(
+      v.taskId,
+      v.prNumber,
+      v.commitSha,
+      v.kind,
+      v.status,
+      v.summary,
+      JSON.stringify(v.detail ?? {}),
+      v.checkpoint ?? 'commit'
+    )
   return Number(info.lastInsertRowid)
+}
+
+/** The synthetic pipeline rollup for (task, checkpoint, sha), or null. */
+export function getPipelineVerdict(
+  taskId: number,
+  checkpoint: TaskVerification['checkpoint'],
+  commitSha: string
+): TaskVerification | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM task_verifications
+       WHERE task_id = ? AND checkpoint = ? AND commit_sha = ? AND kind = 'pipeline'
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(taskId, checkpoint, commitSha) as VerificationRow | undefined
+  return row ? rowToVerification(row) : null
 }
 
 export function listVerificationsForTask(taskId: number): TaskVerification[] {

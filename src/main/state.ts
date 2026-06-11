@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import * as store from './store'
 import { brain } from './brain/brain'
+import { appInstances } from './apps/instances'
 import { Channels } from '@shared/types/ipc'
 import type { StateDelta, StateSlice } from '@shared/types/ipc'
 import type { AppState } from '@shared/types/domain'
@@ -42,6 +43,7 @@ export function buildState(): AppState {
     brainNotes: store.listBrainNotes(200),
     followups: store.listFollowUps(),
     knowledge: store.listKnowledge(),
+    appInstances: appInstances.list(),
     appVersion: app.getVersion(),
     brain: brain.state
   }
@@ -101,6 +103,7 @@ function computeDelta(state: AppState): StateDelta {
       'brainNotes',
       'followups',
       'knowledge',
+      'appInstances',
       'brain'
     )
   } else {
@@ -119,6 +122,7 @@ function computeDelta(state: AppState): StateDelta {
     if (state.brainNotes !== lastState.brainNotes) changed.push('brainNotes')
     if (state.followups !== lastState.followups) changed.push('followups')
     if (state.knowledge !== lastState.knowledge) changed.push('knowledge')
+    if (state.appInstances !== lastState.appInstances) changed.push('appInstances')
     if (state.brain !== lastState.brain) changed.push('brain')
   }
   lastState = state

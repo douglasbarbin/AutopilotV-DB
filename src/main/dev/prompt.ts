@@ -82,6 +82,8 @@ export function buildDevStartPrompt(input: DevStartPromptInput): string {
     '',
     'Coding standards for this run have been injected into ./AGENTS.md in the worktree root (git-ignored, do not commit it). Read it before you start.',
     '',
+    'If a RUNBOOK.md exists in the worktree root, read it before building, running, or testing — it explains how to get THIS repo to a runnable state (setup, secrets, app startup). Never run secrets-manager commands (e.g. `op`) yourself; the orchestrator materializes any required config files before you start.',
+    '',
     `Implement the change on \`${branch}\`, commit, and open a DRAFT pull request against \`${baseBranch}\` with:`,
     '',
     '    gh pr create --draft',

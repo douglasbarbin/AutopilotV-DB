@@ -50,8 +50,12 @@ export interface Repo {
    *  from the active forge setting; never re-derived afterwards. */
   forge: string
   /** Operator-configured verification command (test/build/lint) run before a
-   *  dev PR is surfaced as ready_to_merge. null/undefined = auto-detect or skip. */
+   *  dev PR is surfaced as ready_to_merge. null/undefined = auto-detect or skip.
+   *  Superseded by `runbook` when one resolves; kept as the legacy fallback. */
   verifyCommand?: string | null
+  /** Operator override of the repo's RUNBOOK.md (narrative + fenced yaml
+   *  lifecycle slots). Empty = use the RUNBOOK.md committed in the repo. */
+  runbook?: string | null
 }
 
 export interface TrackerProject {
@@ -93,17 +97,35 @@ export interface TrackerTask {
   addressedThreads: number
 }
 
+/** When a verification verdict was produced in the dev lifecycle. */
+export type VerifyCheckpoint = 'commit' | 'draft' | 'merge_gate'
+
+/** Pipeline stage names (runbook lifecycle slots) plus the legacy/synthetic kinds. */
+export type VerificationKind =
+  | 'setup'
+  | 'secrets'
+  | 'build'
+  | 'test'
+  | 'app'
+  | 'e2e'
+  /** Synthetic per-(checkpoint, sha) rollup of all gating stages. */
+  | 'pipeline'
+  /** Legacy single verify command. */
+  | 'command'
+  /** Advisory LLM diff-vs-ticket check. */
+  | 'spec'
+
 /** One verification verdict for a dev task at a given commit (theme B). */
 export interface TaskVerification {
   id: number
   taskId: number
   prNumber: number | null
   commitSha: string
-  /** 'command' = ran the repo's test/build command; 'spec' = LLM diff-vs-ticket. */
-  kind: 'command' | 'spec'
+  kind: VerificationKind
   status: 'pass' | 'fail' | 'error' | 'skipped'
   summary: string
   detail: Record<string, unknown>
+  checkpoint: VerifyCheckpoint
   createdAt: string
 }
 
@@ -158,6 +180,24 @@ export interface Session {
   exitedAt: string | null
   exitReason: string | null
   title: string
+}
+
+/** A running app started from a repo runbook's `app` slot (agnostic process). */
+export interface AppInstance {
+  /** Unique instance name — safe for container/compose project names. */
+  id: string
+  repoId: number
+  repoName: string
+  taskId: number | null
+  worktreePath: string
+  /** Allocated/declared named ports ({port:name} substitutions). */
+  ports: Record<string, number>
+  pid: number | null
+  status: 'starting' | 'ready' | 'exited' | 'failed'
+  /** Ready-probe URL with ports substituted, when the runbook declares one. */
+  readyUrl: string
+  startedAt: string
+  exitedAt: string | null
 }
 
 export interface Worktree {
@@ -320,6 +360,8 @@ export interface Settings {
   verifySpecConformance: boolean
   /** Theme B: max seconds the verify command may run before it's treated as failed. */
   verifyTimeoutSeconds: number
+  /** Max concurrently RUNNING app instances (runbook app slot) across all repos. */
+  maxRunningApps: number
   agentsTemplate: string
   branchPrefix: string
   terminalCommand: string
@@ -407,6 +449,7 @@ export interface AppState {
   brainNotes: BrainNote[]
   followups: FollowUp[]
   knowledge: KnowledgeItem[]
+  appInstances: AppInstance[]
   appVersion: string
   brain: { lastTickAt: string | null; ticking: boolean; running: boolean; tick: number }
 }

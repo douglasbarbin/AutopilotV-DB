@@ -87,6 +87,15 @@ export function SettingsPanel({ state }: { state: AppState }) {
           />
         </label>
         <label>
+          Max running apps
+          <input
+            type="number"
+            defaultValue={s.maxRunningApps}
+            title="Apps started from repo runbooks (verification + manual runs) across all repos"
+            onBlur={(e) => patch({ maxRunningApps: Math.max(1, Number(e.target.value) || 1) })}
+          />
+        </label>
+        <label>
           Clone parent dir
           <input
             defaultValue={s.cloneParentDir}
@@ -592,7 +601,7 @@ function RepoList({ state }: { state: AppState }) {
             <code>{r.path ?? '— not cloned locally —'}</code>
           </div>
           <label>
-            Verify command
+            Verify command (legacy fallback)
             <input
               key={r.verifyCommand ?? ''}
               defaultValue={r.verifyCommand ?? ''}
@@ -600,13 +609,111 @@ function RepoList({ state }: { state: AppState }) {
               onBlur={(e) => void api.setRepoVerifyCommand(r.id, e.target.value)}
             />
           </label>
+          <RunbookEditor repo={r} />
         </div>
       ))}
       <p className="hint">
-        The verify command runs in the task's worktree (through a shell, so{' '}
-        <code>npm run lint &amp;&amp; npm test</code> works) before a PR is surfaced as
-        ready-to-merge. Leave blank to auto-detect from <code>package.json</code> or skip.
+        A repo&apos;s <strong>runbook</strong> tells AutopilotV (and agents) how to get it runnable:
+        optional setup / secrets / build / test / app / e2e stages, all plain shell you define. Commit
+        a <code>RUNBOOK.md</code> in the repo, or paste an override here. Without one, the verify
+        command above runs before ready-to-merge (blank = auto-detect from <code>package.json</code>{' '}
+        or skip).
       </p>
     </section>
+  )
+}
+
+const RUNBOOK_TEMPLATE = `# Runbook
+
+Plain-English notes for agents: how this repo is built, run, and tested.
+
+\`\`\`yaml
+version: 1
+# All sections optional. Plain shell, run in the task worktree.
+# setup:
+#   - run: npm ci
+#     cacheOn: ["package-lock.json"]
+# secrets:
+#   - run: op inject -i config.template.json -o config.json
+#     produces: [config.json]
+#     cacheTtlHours: 12
+# build:
+#   - dotnet build
+# test:
+#   - npm test
+# app:
+#   run: npm start
+#   ports: { web: auto }            # 'auto' lets AutopilotV allocate {port:web}
+#   ready: { url: "http://localhost:{port:web}/health" }
+# e2e:
+#   - run: npx cypress run --config baseUrl=http://localhost:{port:web}
+#     artifacts: [cypress/screenshots, cypress/videos]
+#     gate: advisory                # or blocking
+\`\`\`
+`
+
+function RunbookEditor({ repo }: { repo: AppState['repos'][number] }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState(repo.runbook ?? '')
+  const [check, setCheck] = useState<{ ok: boolean; error?: string; stages: string[] } | null>(null)
+  const [secretsMsg, setSecretsMsg] = useState('')
+
+  const hasOverride = !!(repo.runbook ?? '').trim()
+  const validate = async (t: string) => setCheck(await api.validateRunbook(t))
+  const save = async () => {
+    await api.setRepoRunbook(repo.id, text)
+    await validate(text)
+  }
+  const refreshSecrets = async () => {
+    const n = await api.refreshRepoSecrets(repo.id)
+    setSecretsMsg(`Cleared ${n} cached secret bundle(s) — the next run re-materializes them.`)
+    setTimeout(() => setSecretsMsg(''), 5000)
+  }
+
+  return (
+    <div className="runbook-editor">
+      <div className="runbook-head">
+        <button className="btn-soft" onClick={() => setOpen(!open)}>
+          {open ? 'Hide runbook' : 'Runbook…'}
+        </button>
+        <span className="work-sub">
+          {hasOverride ? 'override set here' : 'using RUNBOOK.md from the repo if present'}
+        </span>
+        <button className="btn-soft" onClick={() => void refreshSecrets()}>
+          Refresh secrets
+        </button>
+        {secretsMsg && <span className="work-sub">{secretsMsg}</span>}
+      </div>
+      {open && (
+        <>
+          <textarea
+            className="runbook-text"
+            rows={12}
+            value={text}
+            placeholder="Paste a RUNBOOK.md override here, or leave empty to use the repo's own RUNBOOK.md."
+            onChange={(e) => setText(e.target.value)}
+            onBlur={() => void validate(text)}
+          />
+          <div className="runbook-actions">
+            <button className="btn-soft" onClick={() => void save()}>
+              Save override
+            </button>
+            <button className="btn-soft" onClick={() => setText(RUNBOOK_TEMPLATE)}>
+              Insert template
+            </button>
+            {check &&
+              (check.ok ? (
+                <span className="work-sub" style={{ color: 'var(--green)' }}>
+                  valid{check.stages.length ? ` — stages: ${check.stages.join(' → ')}` : ' (narrative only)'}
+                </span>
+              ) : (
+                <span className="work-sub" style={{ color: 'var(--red)' }} title={check.error}>
+                  yaml error: {check.error?.slice(0, 120)}
+                </span>
+              ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }

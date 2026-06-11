@@ -1,6 +1,6 @@
 {
   "name": "autopilotv",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "AutopilotV — agent orchestrator for software development and PR reviewing",
   "main": "./out/main/index.js",
   "author": "justinwoodring",
@@ -32,6 +32,7 @@
     "better-sqlite3": "^12.10.0",
     "node-pty": "^1.1.0",
     "openai": "^4.77.0",
+    "yaml": "^2.9.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

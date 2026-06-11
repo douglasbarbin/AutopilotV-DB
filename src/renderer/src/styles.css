@@ -2157,3 +2157,80 @@ button:disabled {
 .insights .muted-list .findings li {
   color: var(--comment);
 }
+
+/* ===== runbook editor (settings) ===== */
+.runbook-editor {
+  margin-top: 8px;
+}
+.runbook-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.runbook-text {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--bg);
+  color: var(--fg-strong);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.runbook-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+/* ===== running apps strip ===== */
+.running-apps {
+  margin-bottom: 16px;
+}
+.running-apps .section-sub {
+  font-size: 13px;
+  color: var(--comment);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.running-app-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-bottom: 6px;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.modal.app-logs {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  width: min(900px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal.app-logs pre {
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  margin: 10px 0 0;
+}

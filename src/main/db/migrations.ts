@@ -315,6 +315,20 @@ const MIGRATIONS: Migration[] = [
     );
     CREATE INDEX idx_knowledge_status ON knowledge(status);
     `
+  },
+  {
+    // Runbooks + staged verification checkpoints.
+    //   - repos.runbook: operator override of the repo's RUNBOOK.md (plain
+    //     English narrative + fenced yaml lifecycle slots). Empty = use the
+    //     RUNBOOK.md committed in the repo, else the legacy verify_command.
+    //   - task_verifications.checkpoint: when the verdict was produced —
+    //     'commit' (per-push test stage), 'draft' (full pipeline when the PR
+    //     reaches draft), 'merge_gate' (full pipeline before ready_to_merge).
+    version: 16,
+    up: `
+    ALTER TABLE repos ADD COLUMN runbook TEXT NOT NULL DEFAULT '';
+    ALTER TABLE task_verifications ADD COLUMN checkpoint TEXT NOT NULL DEFAULT 'commit';
+    `
   }
 ]
 

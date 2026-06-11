@@ -13,6 +13,7 @@ interface RepoRow {
   clone_state: string
   forge: string | null
   verify_command: string | null
+  runbook: string | null
 }
 
 function rowToRepo(r: RepoRow): Repo {
@@ -24,7 +25,8 @@ function rowToRepo(r: RepoRow): Repo {
     defaultBranch: r.default_branch,
     cloneState: r.clone_state as Repo['cloneState'],
     forge: r.forge ?? 'github',
-    verifyCommand: r.verify_command
+    verifyCommand: r.verify_command,
+    runbook: r.runbook
   }
 }
 
@@ -78,6 +80,11 @@ export function setRepoCloneState(id: number, state: Repo['cloneState'], path?: 
 export function setRepoVerifyCommand(id: number, command: string): void {
   const value = command.trim() || null
   getDb().prepare('UPDATE repos SET verify_command = ? WHERE id = ?').run(value, id)
+}
+
+/** Set (or clear) the operator's runbook override for a repo. */
+export function setRepoRunbook(id: number, runbook: string): void {
+  getDb().prepare('UPDATE repos SET runbook = ? WHERE id = ?').run(runbook.trim(), id)
 }
 
 /**
