@@ -197,7 +197,7 @@ export function App() {
           )}
           {tab === 'reviews' && <ReviewCards state={state} />}
           {tab === 'insights' && <BacklogInsights state={state} />}
-          {tab === 'brain' && <BrainPanel state={state} />}
+          {tab === 'brain' && <BrainPanel state={state} onNavigate={(t) => setTab(t)} />}
           {tab === 'metrics' && <MetricsPanel />}
           {tab === 'events' && <EventsLog state={state} />}
           {tab === 'settings' && <SettingsPanel state={state} />}

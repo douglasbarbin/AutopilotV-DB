@@ -6,6 +6,7 @@ import { api } from '../api'
 
 export function SettingsPanel({ state }: { state: AppState }) {
   const s = state.settings
+  const [tab, setTab] = useState('integrations')
   const [test, setTest] = useState<{ status: 'idle' | 'running' | 'ok' | 'fail'; detail: string }>({
     status: 'idle',
     detail: ''
@@ -44,9 +45,28 @@ export function SettingsPanel({ state }: { state: AppState }) {
       }
     })
 
+  const TABS: { id: string; label: string }[] = [
+    { id: 'integrations', label: 'Integrations' },
+    { id: 'behavior', label: 'Behavior' },
+    { id: 'repos', label: 'Repos & Runbooks' },
+    { id: 'agents', label: 'Agents' },
+    { id: 'app', label: 'App' }
+  ]
+
   return (
-    <div className="settings">
-      <section>
+    <div className={`settings group-${tab}`}>
+      <div className="settings-tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`settings-tab ${tab === t.id ? 'active' : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <section className="set-app">
         <h3>Appearance</h3>
         <label>
           Theme
@@ -68,7 +88,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </div>
       </section>
 
-      <section>
+      <section className="set-behavior">
         <h3>Brain</h3>
         <label>
           Poll interval (s)
@@ -104,7 +124,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </label>
       </section>
 
-      <section>
+      <section className="set-integrations">
         <h3>Code forge</h3>
         <label>
           Active forge
@@ -152,7 +172,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
       </section>
 
       {s.forge === 'github' && (
-        <section>
+        <section className="set-integrations">
           <h3>GitHub</h3>
           <label>
             GitHub username
@@ -195,7 +215,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </section>
       )}
 
-      <section>
+      <section className="set-integrations">
         <h3>Project tracker</h3>
         <label>
           Active tracker
@@ -266,7 +286,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         )}
       </section>
 
-      <section>
+      <section className="set-integrations">
         <h3>LLM (brain judgment)</h3>
         <label>
           Provider
@@ -322,7 +342,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </div>
       </section>
 
-      <section>
+      <section className="set-agents">
         <h3>Agent instructions (AGENTS.md)</h3>
         <label>
           Universal instructions injected into every worktree
@@ -342,7 +362,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </p>
       </section>
 
-      <section>
+      <section className="set-behavior">
         <h3>Dev line</h3>
         <label className="checkbox">
           <input
@@ -384,7 +404,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </p>
       </section>
 
-      <section>
+      <section className="set-behavior">
         <h3>Verification</h3>
         <label className="checkbox">
           <input
@@ -419,7 +439,7 @@ export function SettingsPanel({ state }: { state: AppState }) {
         </p>
       </section>
 
-      <section>
+      <section className="set-behavior">
         <h3>Auto-drive</h3>
         <label className="checkbox">
           <input
@@ -477,7 +497,7 @@ function DangerZone() {
     if (ok) void api.wipeDb()
   }
   return (
-    <section className="danger-zone">
+    <section className="danger-zone set-app">
       <h3>Danger zone</h3>
       <div className="harness-row">
         <div>
@@ -497,7 +517,7 @@ function DangerZone() {
 
 function HarnessList({ state }: { state: AppState }) {
   return (
-    <section>
+    <section className="set-agents">
       <h3>Harnesses</h3>
       <p className="hint">
         Each role (review · brain · coding) uses one default harness; setting a default clears it on
@@ -581,7 +601,7 @@ function HarnessList({ state }: { state: AppState }) {
 
 function RepoList({ state }: { state: AppState }) {
   return (
-    <section>
+    <section className="set-repos">
       <h3>Repos</h3>
       {state.repos.length === 0 && (
         <div className="empty">

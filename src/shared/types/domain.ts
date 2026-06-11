@@ -437,12 +437,21 @@ export interface InsightsStats {
   knowledgeApplications: number
 }
 
+/** One day on the shipped-work heatmap. */
+export interface DailyActivity {
+  date: string // YYYY-MM-DD
+  merges: number
+  reviews: number
+  failures: number
+}
+
 export interface MetricsSnapshot {
   generatedAt: string
   harnesses: HarnessScorecard[]
   dev: DevThroughput
   review: ReviewStats
   insights: InsightsStats
+  daily: DailyActivity[]
 }
 
 // The full snapshot pushed to the renderer.

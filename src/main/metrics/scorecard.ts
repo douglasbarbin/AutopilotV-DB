@@ -6,6 +6,7 @@
  */
 import * as store from '../store'
 import type {
+  DailyActivity,
   DevThroughput,
   HarnessScorecard,
   InsightsStats,
@@ -156,12 +157,28 @@ function buildInsightsStats(): InsightsStats {
   return store.insightsTotals()
 }
 
+function buildDaily(): DailyActivity[] {
+  const byDate = new Map<string, DailyActivity>()
+  for (const row of store.metrics.dailyActivity()) {
+    let d = byDate.get(row.date)
+    if (!d) {
+      d = { date: row.date, merges: 0, reviews: 0, failures: 0 }
+      byDate.set(row.date, d)
+    }
+    if (row.kind === 'dev.merged') d.merges += row.n
+    else if (row.kind === 'dev.verify_failed') d.failures += row.n
+    else d.reviews += row.n
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
 export function computeMetrics(): MetricsSnapshot {
   return {
     generatedAt: new Date().toISOString(),
     harnesses: buildHarnessScorecards(),
     dev: buildDevThroughput(),
     review: buildReviewStats(),
-    insights: buildInsightsStats()
+    insights: buildInsightsStats(),
+    daily: buildDaily()
   }
 }

@@ -129,3 +129,16 @@ export function reviewActionTotals(): { action: string; n: number }[] {
     .prepare("SELECT action, COUNT(*) AS n FROM reviews WHERE action IS NOT NULL GROUP BY action")
     .all() as { action: string; n: number }[]
 }
+
+/** Daily shipped-work + failure counts for the metrics heatmap (last N days). */
+export function dailyActivity(days = 119): { date: string; kind: string; n: number }[] {
+  return getDb()
+    .prepare(
+      `SELECT date(ts) AS date, kind, COUNT(*) AS n
+       FROM events
+       WHERE kind IN ('dev.merged', 'review.submitted', 'review.approved_only', 'dev.verify_failed')
+         AND ts >= date('now', ?)
+       GROUP BY date(ts), kind`
+    )
+    .all(`-${days} days`) as { date: string; kind: string; n: number }[]
+}
