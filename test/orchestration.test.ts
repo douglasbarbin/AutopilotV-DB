@@ -144,8 +144,7 @@ describe('dev phase advances', () => {
     closeDb()
   })
 
-  it('advanceImplementing → draft when .pr-url signal arrives', async () => {
-    // Provision a repo + worktree row.
+  function seedImplementingTask(): number {
     const repoId = seedRepo({ name: 'owner/repo', forge: 'github' })
     const taskId = seedTask({ status: 'in_progress', trackerStatus: 'In Progress' })
     const wtId = store.createWorktree({
@@ -158,17 +157,62 @@ describe('dev phase advances', () => {
     store.setTaskRepo(taskId, repoId)
     store.setTaskWorktree(taskId, wtId)
     store.setTaskPhase(taskId, 'implementing')
+    return taskId
+  }
 
-    // Write the .pr-url signal that an implementing agent would write.
-    writeFileSync(join(worktreeDir, SIGNAL.PR_URL), 'https://github.com/owner/repo/pull/42')
+  it('advanceImplementing → draft when the v2 JSON impl signal arrives', async () => {
+    const taskId = seedImplementingTask()
+    writeFileSync(
+      join(worktreeDir, SIGNAL.IMPL),
+      JSON.stringify({
+        version: 1,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        summary: 'Implemented the thing',
+        followUps: [{ title: 'Add tests for edge case', kind: 'test_gap', priority: 'medium' }],
+        learnings: [{ role: 'coding', insight: 'Repo uses pnpm', confidence: 'high' }],
+        deviations: ''
+      })
+    )
 
-    // findPrForBranch returns null so the code path goes through the .pr-url signal.
     stubForge({ findPrForBranch: vi.fn().mockResolvedValue(null) })
     await ADVANCE_FNS.implementing(store.getTask(taskId)!, store.getSettings())
 
     const t = store.getTask(taskId)
     expect(t?.phase).toBe('draft')
     expect(t?.prNumber).toBe(42)
+    // The structured report is preserved for the analysis engine.
+    const report = store.listEvents(50).find((e) => e.kind === 'signal.report')
+    expect(report).toBeTruthy()
+    expect((report!.payload as { followUps: unknown[] }).followUps).toHaveLength(1)
+  })
+
+  it('advanceImplementing → draft on the legacy bare-URL .pr-url signal', async () => {
+    const taskId = seedImplementingTask()
+    // v1 agents (or agents that cannot produce JSON) write just the URL to the old name.
+    writeFileSync(join(worktreeDir, '.pr-url'), 'https://github.com/owner/repo/pull/42')
+
+    stubForge({ findPrForBranch: vi.fn().mockResolvedValue(null) })
+    await ADVANCE_FNS.implementing(store.getTask(taskId)!, store.getSettings())
+
+    const t = store.getTask(taskId)
+    expect(t?.phase).toBe('draft')
+    expect(t?.prNumber).toBe(42)
+  })
+
+  it('advanceImplementing salvages the PR URL from malformed JSON and still advances', async () => {
+    const taskId = seedImplementingTask()
+    writeFileSync(
+      join(worktreeDir, SIGNAL.IMPL),
+      '{ "prUrl": "https://github.com/owner/repo/pull/42", "summary": "oops no close'
+    )
+
+    stubForge({ findPrForBranch: vi.fn().mockResolvedValue(null) })
+    await ADVANCE_FNS.implementing(store.getTask(taskId)!, store.getSettings())
+
+    const t = store.getTask(taskId)
+    expect(t?.phase).toBe('draft')
+    expect(t?.prNumber).toBe(42)
+    expect(store.listEvents(50).some((e) => e.kind === 'signal.malformed')).toBe(true)
   })
 
   it('advanceImplementing → error when session died without producing PR', async () => {
@@ -205,6 +249,7 @@ describe('dev phase advances', () => {
     store.setTaskPr(taskId, 99, 'https://example.com/pr/99')
     store.setTaskPhase(taskId, 'revising')
 
+    // Bare-touch fallback still works as a signal.
     writeFileSync(join(worktreeDir, SIGNAL.REVISE), '')
     stubForge({ findPrForBranch: vi.fn().mockResolvedValue({ isDraft: true, state: 'OPEN' }) })
     await ADVANCE_FNS.revising(store.getTask(taskId)!, store.getSettings())

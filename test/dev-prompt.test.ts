@@ -64,8 +64,11 @@ describe('buildDevStartPrompt', () => {
     // of the title text, not as prompt structure) and the prompt's own structural
     // quotes are unaffected.
     expect(p).toContain('Fix the "thing" handler')
-    // No extra closing-quote artifacts introduced by the renderer.
-    expect(p.match(/"/g) ?? []).toHaveLength(2)
+    // No extra quote artifacts introduced around the title itself — the only
+    // quotes on the title line are the ones the title carried. (The signal
+    // instruction's JSON template legitimately uses quotes elsewhere.)
+    const titleLine = p.split('\n').find((l) => l.startsWith('You are implementing'))!
+    expect(titleLine.match(/"/g) ?? []).toHaveLength(2)
   })
 
   it('collapses a multi-line title to a single line so it cannot inject new sections', () => {

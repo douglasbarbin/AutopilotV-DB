@@ -222,6 +222,7 @@ export async function requestDevChanges(taskId: number, instructions: string): P
 
   const { writeAdjacentWorkFile } = await import('../worktree/manager')
   const { SIGNAL } = await import('../worktree/signals')
+  const { buildSignalInstruction } = await import('./prompt')
   if (worktree && repo) {
     await writeAdjacentWorkFile(worktree.path, repo.id)
   }
@@ -230,10 +231,9 @@ export async function requestDevChanges(taskId: number, instructions: string): P
     `Additional change request for ${task.issueKey}${task.prNumber ? ` (PR #${task.prNumber})` : ''}:\n\n` +
     `${instructions.trim()}\n\n` +
     `Make these changes in this worktree on branch ${worktree.branch}, commit, and push to update ` +
-    `the existing PR. Do NOT open a new PR. ` +
-    `When you have committed and pushed everything, signal completion by creating an empty file ` +
-    `named ${SIGNAL.REVISE} in this directory (e.g. \`touch ${SIGNAL.REVISE}\`). ` +
-    `That file tells the orchestrator the revision is done.\n\n` +
+    `the existing PR. Do NOT open a new PR.\n\n` +
+    buildSignalInstruction(SIGNAL.REVISE, { includePrUrl: false }) +
+    `\n\n` +
     `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
 
   const sessionId = sessionManager.spawn({

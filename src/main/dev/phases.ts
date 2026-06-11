@@ -5,7 +5,13 @@ import { forgeForRepo } from '../forges'
 import { activeTracker } from '../trackers'
 import { tickState } from '../brain/tickState'
 import { notifier } from '../notify'
-import { SIGNAL, isSignalled, clear as clearSignal } from '../worktree/signals'
+import {
+  SIGNAL,
+  isSignalled,
+  consumeReport,
+  extractPrUrl,
+  type ConsumedSignal
+} from '../worktree/signals'
 import type { TrackerTask, Repo, Settings, DevPhase } from '@shared/types/domain'
 
 /**
@@ -46,13 +52,41 @@ function killTaskSessionIfLive(task: TrackerTask, reason: string): void {
   }
 }
 
+/**
+ * Persist whatever metadata a consumed signal carried. A structured report is
+ * recorded as a `signal.report` event (the post-implementation analysis engine
+ * harvests these); malformed JSON is flagged but never blocks the phase
+ * transition that the bare signal already triggered.
+ */
+function recordSignalReport(task: TrackerTask, phase: string, consumed: ConsumedSignal): void {
+  if (consumed.malformed) {
+    store.recordEvent(
+      'signal.malformed',
+      { taskId: task.id, issueKey: task.issueKey, phase, raw: consumed.raw.slice(0, 500) },
+      { level: 'warn' }
+    )
+    return
+  }
+  if (consumed.report) {
+    store.recordEvent('signal.report', {
+      taskId: task.id,
+      issueKey: task.issueKey,
+      phase,
+      summary: consumed.report.summary,
+      followUps: consumed.report.followUps,
+      learnings: consumed.report.learnings,
+      deviations: consumed.report.deviations
+    })
+  }
+}
+
 // ──────────────────────────── per-phase advances ────────────────────────────
 
 /**
  * implementing → draft (or error).
  *
- * The implementing agent signals "done" by writing `.pr-url` (or by leaving a
- * PR open on the branch, which we discover via the forge).
+ * The implementing agent signals "done" by writing the IMPL signal (or by
+ * leaving a PR open on the branch, which we discover via the forge).
  */
 export async function advanceImplementing(task: TrackerTask, settings: Settings): Promise<void> {
   const repo = task.repoId ? store.getRepo(task.repoId) : null
@@ -60,18 +94,17 @@ export async function advanceImplementing(task: TrackerTask, settings: Settings)
   if (!repo || !worktree) return
   const { forge, config: forgeConfig } = forgeForRepo(repo, settings)
 
-  // Read the agent's .pr-url signal first; fall back to forge discovery.
-  const urlPath = worktree.path
-  const fromFile = urlPath && isSignalled(urlPath, SIGNAL.PR_URL) ? urlPath : null
+  // Consume the agent's IMPL signal first; fall back to forge discovery.
   let pr: { number: number; url: string; isDraft?: boolean } | null = null
   let viaFile = false
-  if (fromFile) {
-    // Parse the PR URL from the signal file and consume it (delete).
-    const content = require('fs').readFileSync(`${fromFile}/${SIGNAL.PR_URL}`, 'utf8') as string
-    clearSignal(fromFile, SIGNAL.PR_URL)
-    const text = content.trim()
-    const m = text.match(/\/(?:pullrequest|pull)\/(\d+)/i)
-    if (m) pr = { number: Number(m[1]), url: text.split(/\s+/)[0] }
+  if (worktree.path && isSignalled(worktree.path, SIGNAL.IMPL)) {
+    const consumed = consumeReport(worktree.path, SIGNAL.IMPL)
+    if (consumed) {
+      recordSignalReport(task, 'impl', consumed)
+      const url = extractPrUrl(consumed)
+      const m = url?.match(/\/(?:pullrequest|pull)\/(\d+)/i)
+      if (url && m) pr = { number: Number(m[1]), url }
+    }
   }
   if (!pr) pr = await forge.findPrForBranch(repo.name, worktree.branch, forgeConfig)
   else viaFile = true
@@ -80,7 +113,7 @@ export async function advanceImplementing(task: TrackerTask, settings: Settings)
     store.setTaskPr(task.id, pr.number, pr.url)
     store.setTaskPhase(task.id, 'draft')
     killTaskSessionIfLive(task, 'draft PR opened')
-    note('dev', `${task.issueKey} opened draft PR #${pr.number}${viaFile ? ' (via .pr-url)' : ''}.`, {
+    note('dev', `${task.issueKey} opened draft PR #${pr.number}${viaFile ? ` (via ${SIGNAL.IMPL})` : ''}.`, {
       key: task.issueKey
     })
     return
@@ -112,7 +145,10 @@ export async function advanceRevising(task: TrackerTask, settings: Settings): Pr
 
   const signalled = worktree ? isSignalled(worktree.path, SIGNAL.REVISE) : false
   if (signalled || !isTaskSessionActive(task)) {
-    if (signalled && worktree) clearSignal(worktree.path, SIGNAL.REVISE)
+    if (signalled && worktree) {
+      const consumed = consumeReport(worktree.path, SIGNAL.REVISE)
+      if (consumed) recordSignalReport(task, 'revise', consumed)
+    }
     killTaskSessionIfLive(task, 'revision complete')
 
     let next: DevPhase = 'draft'
@@ -192,7 +228,8 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
   // Consume any address-comments signal.
   const addrSignalled = worktree ? isSignalled(worktree.path, SIGNAL.ADDRESS_COMMENTS) : false
   if (addrSignalled && worktree) {
-    clearSignal(worktree.path, SIGNAL.ADDRESS_COMMENTS)
+    const consumed = consumeReport(worktree.path, SIGNAL.ADDRESS_COMMENTS)
+    if (consumed) recordSignalReport(task, 'address_comments', consumed)
     killTaskSessionIfLive(task, 'comments addressed')
     // Record the commit we just pushed and the current open-thread count, so a
     // sticky "changes requested" review doesn't re-spawn another round on the
@@ -293,14 +330,14 @@ async function startAddressComments(
   const { writeAdjacentWorkFile } = await import('../worktree/manager')
   await writeAdjacentWorkFile(worktree.path, repo.id)
 
+  const { buildSignalInstruction } = await import('./prompt')
   const prompt =
     `Reviewers left feedback on PR #${task.prNumber} (${repo.name}).\n` +
     `Read the unresolved review comments (e.g. \`gh pr view ${task.prNumber} --comments\`), ` +
     `address them in this worktree, commit, and push to the same branch. ` +
-    `Reply to or resolve threads where appropriate. ` +
-    `When you have committed and pushed all fixes, signal completion by creating an empty file ` +
-    `named ${SIGNAL.ADDRESS_COMMENTS} in this directory (e.g. \`touch ${SIGNAL.ADDRESS_COMMENTS}\`). ` +
-    `That file tells the orchestrator you are done so it can re-check the PR.\n\n` +
+    `Reply to or resolve threads where appropriate.\n\n` +
+    buildSignalInstruction(SIGNAL.ADDRESS_COMMENTS, { includePrUrl: false }) +
+    `\n\n` +
     `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
   const sessionId = sessionManager.spawn({
     kind: 'dev',
@@ -335,14 +372,14 @@ async function startVerificationFix(
   const { writeAdjacentWorkFile } = await import('../worktree/manager')
   await writeAdjacentWorkFile(worktree.path, repo.id)
 
+  const { buildSignalInstruction } = await import('./prompt')
   const prompt =
     `Automated verification FAILED for PR #${task.prNumber} (${repo.name}) before it could be marked ready to merge.\n\n` +
     `Verification output:\n${failureSummary.slice(0, 3000)}\n\n` +
     `Diagnose and fix the failure in this worktree on the PR's branch, commit, and push to update the existing PR. ` +
-    `Do NOT open a new PR. ` +
-    `When you have committed and pushed the fix, signal completion by creating an empty file ` +
-    `named ${SIGNAL.ADDRESS_COMMENTS} in this directory (e.g. \`touch ${SIGNAL.ADDRESS_COMMENTS}\`). ` +
-    `That file tells the orchestrator to re-check and re-verify the PR.\n\n` +
+    `Do NOT open a new PR.\n\n` +
+    buildSignalInstruction(SIGNAL.ADDRESS_COMMENTS, { includePrUrl: false }) +
+    `\n\n` +
     `Adjacent work context (other active branches and files currently being edited) is available in the git-ignored ADJACENT_WORK.md file. Read it to coordinate and avoid conflicts on shared files.\n`
 
   const sessionId = sessionManager.spawn({
