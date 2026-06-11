@@ -80,7 +80,7 @@ environment + integration setup.
 | Claude invocation | Always `claude --permission-mode auto` (sessions + headless judgment) |
 | PR discovery | Explicit: **GitHub username + watched repos**, queried per-repo via `gh pr list --search review-requested:<user>` (avoids the `@me` raw-search pitfall); falls back to a global search filter |
 | Jira scoping | **Current sprint, epics excluded**; raw Jira status surfaced; **per-project → repo mapping** for dev work |
-| Dev control signals | Agents emit git-ignored files in the worktree: `.pr-url` (PR opened), `.revise` (revision done), `.address-comments` (feedback addressed) — AutopilotV watches these to advance/kill sessions |
+| Dev control signals | Agents emit git-ignored JSON signal files in the worktree: `.autopilotv-impl` (PR opened), `.autopilotv-revise` (revision done), `.autopilotv-address-comments` (feedback addressed) — AutopilotV watches these to advance/kill sessions, and harvests the follow-ups/learnings they carry (legacy v1 names still accepted) |
 | Agent instructions | Configurable **AGENTS.md template** injected (git-ignored) into every worktree |
 | Auto-drive | **Per-session toggle** (global setting seeds the default) |
 | Session recovery | **Graceful kill + resumable work items** — PTYs die with the app; work returns to claimable, resumes next launch |
@@ -369,13 +369,13 @@ unclaimed
      worktree checked out to that PR's branch. With no PR to adopt it falls back to a
      fresh implementation, exactly like Start.)
 implementing   — feature worktree + branch; Jira → In Progress; agent implements
-               and opens a DRAFT PR, signalling completion by writing .pr-url
+               and opens a DRAFT PR, signalling completion by writing .autopilotv-impl
 draft          — PR detected; awaits publish
   → publish    — auto (setting) or your click; gh pr ready; Jira → In Review
 revising       — internal "Request changes" (draft or in_review): agent edits in the
-               same worktree, pushes, writes .revise → returns to prior phase
+               same worktree, pushes, writes .autopilotv-revise → returns to prior phase
 in_review      — babysit: poll readiness; on changes-requested / unresolved threads,
-               spawn an address-comments session (writes .address-comments when done)
+               spawn an address-comments session (writes .autopilotv-address-comments when done)
   → ready_to_merge  when approvals ≥ configured count AND 0 unresolved threads
                     AND mergeable AND checks green
 ready_to_merge — pending your Merge click (squash via gh); never auto-merges
@@ -388,11 +388,30 @@ error          — recoverable via Retry/Reset (force-discards the worktree + br
 mapping); otherwise the first watched, locally-cloned repo. If the target isn't
 cloned, the task errors with a clear reason.
 
-**Control-file protocol.** Because interactive harnesses don't exit on their own,
-agents signal completion by `touch`-ing a git-ignored file in the worktree, which
-AutopilotV watches each tick: `.pr-url` (implementation done — also carries the URL),
-`.revise` (revision done), `.address-comments` (review feedback addressed). Each is
-consumed (deleted) so the next round can run.
+**Control-file protocol (v2).** Because interactive harnesses don't exit on their
+own, agents signal completion by writing a git-ignored file in the worktree, which
+AutopilotV watches each tick: `.autopilotv-impl` (implementation done — carries the
+PR URL), `.autopilotv-revise` (revision done), `.autopilotv-address-comments`
+(review feedback addressed). Each is consumed (deleted) so the next round can run.
+
+Signals are versioned JSON reports carrying metadata beyond the bare completion
+bit: `{ version, prUrl?, summary, followUps[], learnings[], deviations }`.
+Parsing is layered so orchestration never depends on the agent writing perfect
+JSON — valid JSON is fully harvested; a bare URL or empty `touch` (the v1
+formats, including the legacy `.pr-url`/`.revise`/`.address-comments` names)
+still advances the lifecycle; malformed JSON has its PR URL salvaged, is flagged
+via a `signal.malformed` event, and advances anyway.
+
+**Post-implementation analysis.** When a PR merges, an analysis pass (before the
+worktree is pruned) harvests: the agent-reported followUps/learnings, TODO/FIXME
+lines the diff introduced, the PR conversation, and verification failures — a
+single schema-validated LLM distillation on top of a deterministic baseline.
+Results land in the `followups` and `knowledge` tables and surface in the
+**Backlog & Insights** pane: follow-ups become tracker stories on an explicit
+click (all tracker adapters implement `createIssue`); accepted learnings are
+injected into future sessions' AGENTS.md as a per-repo/per-role "learned
+conventions" section, capped and consolidated daily (merge duplicates, retire
+stale items) so the set stays signal rather than noise.
 
 **Settings.** `autoPublish` (default off → awaits your Publish), `requiredApprovals`
 (default 1).
@@ -700,7 +719,7 @@ All v1 open questions resolved. Remaining unknowns are implementation-level
 7. **M6 — Software-dev lifecycle (full):** phase machine
    claim→implement→draft→publish→in_review→ready_to_merge→done, with internal
    Request-changes (`revising`), address-comments, and control-file signals
-   (`.pr-url`/`.revise`/`.address-comments`); stops at ready-to-merge (never auto-merges).
+   (`.autopilotv-impl`/`.autopilotv-revise`/`.autopilotv-address-comments`); stops at ready-to-merge (never auto-merges).
 8. **M7 — Productionization:** sprint/epic scoping + project→repo mapping,
    per-session auto-drive, AGENTS.md template, terminal, Wipe DB,
    cross-platform packaging + CI, MIT license.

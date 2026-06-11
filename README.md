@@ -56,8 +56,12 @@ instead of typing prompts.
 
 - **Headful agent sessions.** Each agent runs in a real PTY rendered with xterm.js;
   watch any session live and type into it whenever you want.
-- **Auto-drive.** The brain detects stalled sessions and answers their prompts to
-  keep them moving, gated by a destructive-command denylist and a per-session toggle.
+- **Auto-drive.** The brain detects stalled sessions — on what's visibly on
+  screen, not raw byte flow, so spinners and timers can't mask a stuck prompt —
+  and answers them with text or raw keypresses (Enter, arrow-key menus), gated
+  by a destructive-command denylist, an injection-effectiveness check, and a
+  per-session toggle. Kickoff is closed-loop too: the task prompt is typed only
+  once the harness looks ready and is verified to have echoed before submitting.
 - **Pluggable by design.**
   - *Trackers:* Jira (`acli`), GitHub Projects (`gh`), Azure DevOps Boards
     (REST), and Vikunja — the active adapter drives the settings UI.
@@ -67,11 +71,20 @@ instead of typing prompts.
   - *Brain LLM:* a local OpenAI-compatible endpoint, or any harness run headless.
 - **A complete dev lifecycle:** `unclaimed → implementing → draft → in_review →
   ready_to_merge → done`, including internal "Request changes" and review-feedback
-  rounds, coordinated through git-ignored signal files (`.pr-url`, `.revise`,
-  `.address-comments`).
+  rounds, coordinated through git-ignored JSON signal files (`.autopilotv-impl`,
+  `.autopilotv-revise`, `.autopilotv-address-comments`; the legacy bare-file
+  names still work). Signals carry structured reports — summary, follow-up work
+  items, learned knowledge — that feed the post-implementation analysis engine.
+- **A PM loop.** Merged work is analyzed (agent reports, PR conversation, TODOs
+  the diff introduced, verification history) into follow-up story candidates and
+  learned repo conventions. The **Backlog & Insights** pane turns follow-ups
+  into tracker stories on a click (all four trackers can create issues) and
+  curates which learnings are injected into future sessions.
 - **Project-to-repo mapping, sprint scoping, and epic filtering.**
-- **AGENTS.md template** injected (git-ignored) into every worktree, so you can
-  refine your coding standards over time and every agent inherits them.
+- **AGENTS.md template** injected (git-ignored) into every worktree, plus an
+  auto-curated "learned conventions" section per repo and role — accepted
+  learnings flow back into every future session, and a daily consolidation pass
+  keeps the set small and sharp.
 - **Crash recovery.** Work leases expire and are re-claimable on the next launch;
   orphaned sessions and worktrees are reconciled at boot.
 - **Themes.** Tomorrow Night 80s (default), Tokyo Night, Synthwave, and a light
