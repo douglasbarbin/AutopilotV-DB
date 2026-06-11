@@ -118,25 +118,41 @@ export class SessionManager extends EventEmitter {
       args = [...args, '-a']
     }
 
-    const proc = pty.spawn(opts.harness.launch.command, args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 32,
-      cwd: opts.cwd,
-      // sanitizeChildEnv strips npm lifecycle vars (npm_config_local_prefix,
-      // INIT_CWD, …) that point at AutopilotV's own repo and would corrupt
-      // npm resolution inside the session's worktree.
-      env: sanitizeChildEnv({
-        ...opts.env,
-        // Advertise full 24-bit truecolor support so tools like bat, delta,
-        // lazygit, rich, etc. render with their full color output without
-        // needing any extra user configuration.
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-        ...lmEnv,
-        ...(opts.harness.launch.env ?? {})
-      }) as { [k: string]: string }
-    })
+    let proc: pty.IPty
+    try {
+      proc = pty.spawn(opts.harness.launch.command, args, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 32,
+        cwd: opts.cwd,
+        // sanitizeChildEnv strips npm lifecycle vars (npm_config_local_prefix,
+        // INIT_CWD, …) that point at AutopilotV's own repo and would corrupt
+        // npm resolution inside the session's worktree.
+        env: sanitizeChildEnv({
+          ...opts.env,
+          // Advertise full 24-bit truecolor support so tools like bat, delta,
+          // lazygit, rich, etc. render with their full color output without
+          // needing any extra user configuration.
+          TERM: 'xterm-256color',
+          COLORTERM: 'truecolor',
+          ...lmEnv,
+          ...(opts.harness.launch.env ?? {})
+        }) as { [k: string]: string }
+      })
+    } catch (err) {
+      // The PTY never came up (missing binary, bad cwd, posix_spawn failure).
+      // Without this, the session row stays 'starting' forever with no live
+      // entry — the exact unkillable state. Mark it dead at the source.
+      log.warn('harness failed to launch', { sessionId, command: opts.harness.launch.command, err: String(err) })
+      store.setSessionStatus(sessionId, 'killed', `launch failed: ${String(err).slice(0, 160)}`)
+      store.recordEvent(
+        'session.launch_failed',
+        { harness: opts.harness.id, command: opts.harness.launch.command, err: String(err).slice(0, 200) },
+        { level: 'warn', sessionId }
+      )
+      this.emit('status', sessionId, 'killed')
+      return sessionId
+    }
 
     const transcriptPath = join(this.transcriptsDir, `session-${sessionId}.log`)
     const transcript = createWriteStream(transcriptPath, { flags: 'a' })
@@ -330,15 +346,67 @@ export class SessionManager extends EventEmitter {
 
   kill(sessionId: number, reason: string): void {
     const ls = this.live.get(sessionId)
-    if (!ls) return
+    if (!ls) {
+      // No live PTY (launch failed, orphaned, already reaped): a kill must
+      // still STICK in the bookkeeping, or the row wedges in an active status
+      // the UI can never clear.
+      const current = store.getSession(sessionId)
+      if (current && ['starting', 'running', 'stalled', 'needs_human'].includes(current.status)) {
+        store.setSessionStatus(sessionId, 'killed', `${reason} (no live process)`)
+        store.recordEvent('session.killed', { reason, orphan: true }, { sessionId })
+        this.emit('status', sessionId, 'killed')
+      }
+      return
+    }
     store.setSessionStatus(sessionId, 'killed', reason)
     store.recordEvent('session.killed', { reason }, { sessionId })
     this.emit('status', sessionId, 'killed')
+
+    // Escalating kill: TERM the process group (harnesses spawn children), then
+    // KILL anything still alive after a grace period, then force the cleanup
+    // even if the kernel won't reap it — the UI must never show an
+    // un-dismissable session.
+    this.signal(ls, 'SIGTERM')
+    setTimeout(() => {
+      if (!this.live.has(sessionId)) return
+      this.signal(ls, 'SIGKILL')
+      setTimeout(() => {
+        if (this.live.has(sessionId)) this.forceCleanup(sessionId, 'kill timeout')
+      }, 2000)
+    }, 2500)
+  }
+
+  /** Signal the session's process group, falling back to the PTY leader. */
+  private signal(ls: LiveSession, sig: NodeJS.Signals): void {
     try {
-      ls.proc.kill()
+      process.kill(-ls.proc.pid, sig)
     } catch {
-      /* already gone */
+      try {
+        ls.proc.kill(sig)
+      } catch {
+        /* already gone */
+      }
     }
+  }
+
+  /** Last resort: drop the bookkeeping for a process that won't die. */
+  private forceCleanup(sessionId: number, why: string): void {
+    const ls = this.live.get(sessionId)
+    if (!ls) return
+    log.warn('session process unresponsive to SIGKILL; dropping bookkeeping', { sessionId, pid: ls.proc.pid, why })
+    store.recordEvent('session.force_cleaned', { pid: ls.proc.pid, why }, { level: 'warn', sessionId })
+    try {
+      ls.transcript.end()
+    } catch {
+      /* ignore */
+    }
+    try {
+      rmSync(ls.transcriptPath, { force: true })
+    } catch {
+      /* ignore */
+    }
+    this.live.delete(sessionId)
+    this.emit('status', sessionId, 'killed')
   }
 
   /** Graceful shutdown: SIGTERM then SIGKILL after a grace period. */
