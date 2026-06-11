@@ -76,9 +76,9 @@ describe('insights store', () => {
     expect(f.createdIssueKey).toBe('TEST-42')
   })
 
-  it('harvestSignalReport stores follow-ups and learnings from an agent report', () => {
+  it('harvestSignalReport stores follow-ups and learnings from an agent report', async () => {
     const task = seedTask()
-    const res = harvestSignalReport(task, {
+    const res = await harvestSignalReport(task, {
       version: 1,
       summary: 'did things',
       deviations: '',
@@ -107,6 +107,15 @@ describe('insights store', () => {
 
     const picked = store.selectKnowledgeForInjection(repoId, 'coding')
     expect(picked.map((k) => k.insight).sort()).toEqual(['Global active insight', 'Use pnpm'])
+
+    // Review sessions see review-role AND coding-role conventions — learned
+    // coding style is exactly what a reviewer checks for.
+    const forReview = store.selectKnowledgeForInjection(repoId, 'review')
+    expect(forReview.map((k) => k.insight).sort()).toEqual([
+      'Global active insight',
+      'Review-only insight',
+      'Use pnpm'
+    ])
 
     store.markKnowledgeApplied(picked.map((k) => k.id))
     const after = store.listKnowledge().find((k) => k.id === a)!

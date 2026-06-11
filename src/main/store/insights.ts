@@ -80,7 +80,9 @@ export function insertFollowUp(f: {
   files?: string[]
   source?: string
 }): number | null {
-  const hash = dedupeHash('followup', f.repoId ?? null, f.kind ?? 'todo', f.title)
+  // kind deliberately NOT hashed: the same suggestion re-labeled todo vs
+  // tech_debt between rounds must still collide.
+  const hash = dedupeHash('followup', f.repoId ?? null, f.title)
   const info = getDb()
     .prepare(
       `INSERT OR IGNORE INTO followups
@@ -134,6 +136,11 @@ export function updateFollowUp(
       patch.priority ?? cur.priority,
       id
     )
+}
+
+/** Remove a follow-up entirely (semantic-duplicate drop). */
+export function deleteFollowUp(id: number): void {
+  getDb().prepare('DELETE FROM followups WHERE id = ?').run(id)
 }
 
 export function setFollowUpStatus(id: number, status: FollowUpStatus, createdIssueKey = ''): void {
@@ -234,22 +241,26 @@ export function setKnowledgeStatus(id: number, status: KnowledgeStatus): void {
  * The knowledge set injected into a new session's AGENTS.md: active items for
  * this repo (or global), matching the session's role, best-first, capped so the
  * injected block stays signal rather than noise.
+ *
+ * Review sessions get coding-role items TOO: learned coding conventions are
+ * exactly what a reviewer should be checking for.
  */
 export function selectKnowledgeForInjection(
   repoId: number,
   role: KnowledgeRole,
   limit = 15
 ): KnowledgeItem[] {
+  const roles = role === 'review' ? ['review', 'coding'] : [role]
   const rows = getDb()
     .prepare(
       `SELECT * FROM knowledge
-       WHERE status = 'active' AND role = ?
+       WHERE status = 'active' AND role IN (${roles.map(() => '?').join(',')})
          AND (scope = 'global' OR repo_id = ?)
        ORDER BY CASE confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
                 updated_at DESC
        LIMIT ?`
     )
-    .all(role, repoId, limit) as KnowledgeRow[]
+    .all(...roles, repoId, limit) as KnowledgeRow[]
   return rows.map(rowToKnowledge)
 }
 

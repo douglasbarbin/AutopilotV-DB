@@ -90,6 +90,7 @@ export {
   listFollowUps,
   getFollowUp,
   updateFollowUp,
+  deleteFollowUp,
   setFollowUpStatus,
   insertKnowledge,
   listKnowledge,

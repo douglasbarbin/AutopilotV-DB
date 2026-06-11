@@ -31,13 +31,13 @@ import type { Settings, TrackerTask } from '@shared/types/domain'
  *    no LLM is reachable.
  */
 
-export function harvestSignalReport(
+export async function harvestSignalReport(
   task: TrackerTask,
   report: SignalReport,
   source = 'signal'
-): { followUps: number; learnings: number } {
-  let followUps = 0
+): Promise<{ followUps: number; learnings: number }> {
   let learnings = 0
+  const newIds: number[] = []
   for (const f of report.followUps) {
     const id = store.insertFollowUp({
       taskId: task.id,
@@ -51,7 +51,7 @@ export function harvestSignalReport(
       files: f.files,
       source
     })
-    if (id !== null) followUps++
+    if (id !== null) newIds.push(id)
   }
   for (const l of report.learnings) {
     const id = store.insertKnowledge({
@@ -65,7 +65,62 @@ export function harvestSignalReport(
     })
     if (id !== null) learnings++
   }
-  return { followUps, learnings }
+  const dropped = await semanticDedupeFollowUps(task.repoId, newIds)
+  return { followUps: newIds.length - dropped, learnings }
+}
+
+const FollowUpDedupeSchema = z.object({
+  duplicates: z.array(z.object({ newId: z.number(), duplicateOf: z.number() })).catch([])
+})
+
+/**
+ * The content hash only catches byte-identical re-suggestions; agents reword
+ * the same idea every address-comments round. One judgment call compares the
+ * just-inserted candidates against the repo's EXISTING follow-ups — including
+ * dismissed and created ones, because "dismissed" means "stop suggesting
+ * this" and "created" means "already a story". Confirmed rewordings are
+ * deleted. Degrades to hash-only dedupe when no LLM is reachable.
+ */
+async function semanticDedupeFollowUps(repoId: number | null, newIds: number[]): Promise<number> {
+  if (newIds.length === 0) return 0
+  const all = store.listFollowUps()
+  const fresh = all.filter((f) => newIds.includes(f.id))
+  const existing = all.filter((f) => !newIds.includes(f.id) && f.repoId === repoId).slice(0, 60)
+  if (fresh.length === 0 || existing.length === 0) return 0
+  try {
+    const provider = makeProvider(store.getSettings())
+    const result = await judgeValidated<z.infer<typeof FollowUpDedupeSchema>>(
+      provider,
+      {
+        schemaName: 'FollowUpDedupe',
+        system:
+          'You deduplicate backlog suggestions for a dev pipeline. A NEW item is a duplicate when it asks for ' +
+          'substantially the same work as an EXISTING item, even when reworded, re-scoped slightly, or labeled with a ' +
+          'different kind. Be conservative: only mark genuine duplicates; different work on the same file is NOT a duplicate.',
+        user:
+          `EXISTING follow-ups (id: [status] title — description):\n` +
+          existing.map((f) => `${f.id}: [${f.status}] ${f.title} — ${f.description.slice(0, 140)}`).join('\n') +
+          `\n\nNEW candidates (id: title — description):\n` +
+          fresh.map((f) => `${f.id}: ${f.title} — ${f.description.slice(0, 140)}`).join('\n') +
+          `\n\nRespond as JSON: {"duplicates":[{"newId":<new id>,"duplicateOf":<existing id>}]}`
+      },
+      FollowUpDedupeSchema
+    )
+    let dropped = 0
+    const existingIds = new Set(existing.map((f) => f.id))
+    for (const d of result.duplicates) {
+      if (!newIds.includes(d.newId) || !existingIds.has(d.duplicateOf)) continue
+      store.deleteFollowUp(d.newId)
+      dropped++
+    }
+    if (dropped > 0) {
+      store.recordEvent('followup.deduped', { repoId, dropped, kept: newIds.length - dropped })
+    }
+    return dropped
+  } catch (err) {
+    log.warn('semantic follow-up dedupe unavailable; keeping hash-only dedupe', { err: String(err) })
+    return 0
+  }
 }
 
 const AnalysisResultSchema = z.object({
@@ -182,7 +237,7 @@ export async function runPostMergeAnalysis(task: TrackerTask, settings: Settings
         },
         AnalysisResultSchema
       )
-      distilled = harvestSignalReport(task, { version: 1, summary: '', deviations: '', ...result }, 'analysis')
+      distilled = await harvestSignalReport(task, { version: 1, summary: '', deviations: '', ...result }, 'analysis')
     } catch (err) {
       log.warn('post-merge distillation failed; keeping deterministic harvest', {
         taskId: task.id,

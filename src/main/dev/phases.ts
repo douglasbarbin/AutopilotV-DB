@@ -80,7 +80,7 @@ async function recordSignalReport(task: TrackerTask, phase: string, consumed: Co
     try {
       // Lazy import, same rationale as ./verify below.
       const { harvestSignalReport } = await import('../analysis/engine')
-      harvestSignalReport(task, consumed.report)
+      await harvestSignalReport(task, consumed.report)
     } catch (err) {
       log.warn('signal report harvest failed', { taskId: task.id, err: String(err) })
     }
