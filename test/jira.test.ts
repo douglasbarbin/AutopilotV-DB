@@ -39,3 +39,43 @@ describe('jiraTracker.transition', () => {
     await expect(jiraTracker.transition('X-1', 'In Progress', {})).rejects.toThrow(/transition failed/)
   })
 })
+
+describe('jiraTracker.createIssue', () => {
+  beforeEach(() => execMock.mockReset())
+
+  const draft = {
+    projectKey: 'LDWF',
+    title: 'Add tests for parser',
+    description: 'From AutopilotV analysis',
+    kind: 'test_gap',
+    priority: 'medium' as const
+  }
+
+  it('creates a Task and parses the key from JSON output', async () => {
+    execMock.mockResolvedValue({ stdout: JSON.stringify({ key: 'LDWF-99' }), stderr: '', code: 0 })
+    const created = await jiraTracker.createIssue!(draft, {})
+    expect(created.key).toBe('LDWF-99')
+    const [, args] = execMock.mock.calls[0]
+    expect(args.slice(0, 3)).toEqual(['jira', 'workitem', 'create'])
+    expect(args).toContain('--project')
+    expect(args[args.indexOf('--type') + 1]).toBe('Task')
+  })
+
+  it('maps bug follow-ups to the Bug issue type', async () => {
+    execMock.mockResolvedValue({ stdout: JSON.stringify({ key: 'LDWF-100' }), stderr: '', code: 0 })
+    await jiraTracker.createIssue!({ ...draft, kind: 'bug' }, {})
+    const [, args] = execMock.mock.calls[0]
+    expect(args[args.indexOf('--type') + 1]).toBe('Bug')
+  })
+
+  it('salvages the key by regex when acli output is not clean JSON', async () => {
+    execMock.mockResolvedValue({ stdout: '✓ Created work item LDWF-101', stderr: '', code: 0 })
+    const created = await jiraTracker.createIssue!(draft, {})
+    expect(created.key).toBe('LDWF-101')
+  })
+
+  it('throws when no key can be found', async () => {
+    execMock.mockResolvedValue({ stdout: 'something went sideways', stderr: '', code: 0 })
+    await expect(jiraTracker.createIssue!(draft, {})).rejects.toThrow(/no issue key/)
+  })
+})

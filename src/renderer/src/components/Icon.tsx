@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 
 interface IconProps {
-  name: 'queue' | 'sessions' | 'reviews' | 'brain' | 'activity' | 'settings' | 'bolt' | 'dot' | 'play' | 'pause' | 'terminal' | 'chart'
+  name: 'queue' | 'sessions' | 'reviews' | 'brain' | 'activity' | 'settings' | 'bolt' | 'dot' | 'play' | 'pause' | 'terminal' | 'chart' | 'lightbulb'
   size?: number
 }
 
@@ -64,6 +64,13 @@ const PATHS: Record<IconProps['name'], ReactElement> = {
       <rect x="6" y="11" width="3" height="6" rx="0.5" />
       <rect x="11" y="7" width="3" height="10" rx="0.5" />
       <rect x="16" y="13" width="3" height="4" rx="0.5" />
+    </>
+  ),
+  lightbulb: (
+    <>
+      <path d="M9 18h6" />
+      <path d="M10 21h4" />
+      <path d="M12 3a6 6 0 0 0-4 10.5c.8.7 1.3 1.5 1.5 2.5h5c.2-1 .7-1.8 1.5-2.5A6 6 0 0 0 12 3z" />
     </>
   )
 }

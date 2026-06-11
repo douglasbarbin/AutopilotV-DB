@@ -2,7 +2,14 @@ import { ipcMain, BrowserWindow, nativeTheme } from 'electron'
 import { spawn } from 'child_process'
 import { Channels } from '@shared/types/ipc'
 import type { NotificationPayload, WorkRef } from '@shared/types/ipc'
-import type { HarnessConfig, ReviewAction, Settings } from '@shared/types/domain'
+import type {
+  FollowUpStatus,
+  HarnessConfig,
+  KnowledgeStatus,
+  ReviewAction,
+  Settings
+} from '@shared/types/domain'
+import { activeTracker } from './trackers'
 import * as store from './store'
 import { resetDatabase } from './db'
 import { sessionManager } from './sessions/manager'
@@ -286,6 +293,61 @@ export function registerIpc(): void {
   handle(Channels.repoSetVerifyCommand, async (repoId: number, command: string) => {
     store.setRepoVerifyCommand(repoId, command)
     store.recordEvent('repo.verify_command_set', { repoId })
+    pushState()
+  })
+
+  // ---- Backlog & Insights (PM loop) ----
+
+  handle(
+    Channels.followupUpdate,
+    async (
+      id: number,
+      patch: { title?: string; description?: string; projectKey?: string; priority?: 'low' | 'medium' | 'high' }
+    ) => {
+      store.updateFollowUp(id, patch)
+      pushState()
+    }
+  )
+
+  handle(Channels.followupSetStatus, async (id: number, status: FollowUpStatus) => {
+    store.setFollowUpStatus(id, status)
+    store.recordEvent('followup.status_set', { followupId: id, status })
+    pushState()
+  })
+
+  handle(Channels.followupCreateStory, async (id: number) => {
+    const f = store.getFollowUp(id)
+    if (!f) throw new Error(`follow-up ${id} not found`)
+    const settings = store.getSettings()
+    const { tracker, config } = activeTracker(settings)
+    if (!tracker.capabilities?.createIssue || !tracker.createIssue) {
+      throw new Error(`The ${tracker.id} tracker does not support creating issues`)
+    }
+    const repo = f.repoId ? store.getRepo(f.repoId) : null
+    const description =
+      (f.description || f.title) +
+      (f.files.length ? `\n\nRelevant files: ${f.files.join(', ')}` : '') +
+      (f.issueKey ? `\n\nSurfaced by AutopilotV post-implementation analysis of ${f.issueKey}.` : '')
+    const created = await tracker.createIssue(
+      {
+        projectKey: f.projectKey,
+        title: f.title,
+        description,
+        kind: f.kind,
+        priority: f.priority,
+        repoName: repo?.name
+      },
+      config
+    )
+    store.setFollowUpStatus(id, 'created', created.key)
+    store.recordEvent('followup.story_created', { followupId: id, issueKey: created.key, url: created.url })
+    pushState()
+    return created
+  })
+
+  handle(Channels.knowledgeSetStatus, async (id: number, status: KnowledgeStatus) => {
+    store.setKnowledgeStatus(id, status)
+    store.recordEvent('knowledge.status_set', { knowledgeId: id, status })
     pushState()
   })
 

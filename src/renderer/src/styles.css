@@ -2104,3 +2104,56 @@ button:disabled {
   padding-bottom: 10px;
   margin-bottom: 10px;
 }
+
+/* ===== backlog & insights ===== */
+.insights {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 880px;
+}
+.insights .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--fg-strong);
+  margin: 0 0 12px;
+}
+.insights .section-sub {
+  font-size: 13px;
+  color: var(--comment);
+  margin: 18px 0 10px;
+  font-weight: 600;
+}
+.insights .review-cards + .section-sub {
+  margin-top: 22px;
+}
+.insights .inline-edit {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg-strong);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  margin-bottom: 8px;
+}
+.insights .inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--comment);
+  margin-bottom: 8px;
+}
+.insights .inline-label select {
+  background: var(--bg);
+  color: var(--fg-strong);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.insights .muted-list .findings li {
+  color: var(--comment);
+}

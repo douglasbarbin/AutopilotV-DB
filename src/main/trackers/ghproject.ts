@@ -1,6 +1,6 @@
 import { exec } from '../util/exec'
 import { log } from '../log'
-import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
+import type { IssueDraft, ProjectTracker, TrackerIssue, TransitionTarget } from './types'
 
 function repoNwo(repository: unknown): string {
   const s = String(repository ?? '')
@@ -42,6 +42,7 @@ const PRIORITY_WORDS: Record<string, number> = {
  */
 export const ghProjectTracker: ProjectTracker = {
   id: 'ghproject',
+  capabilities: { createIssue: true },
 
   async listAssigned(config): Promise<TrackerIssue[]> {
     const owner = config.owner ?? ''
@@ -108,5 +109,37 @@ export const ghProjectTracker: ProjectTracker = {
       { timeoutMs: 12_000 }
     )
     return { ok: r.code === 0, detail: r.code === 0 ? `${owner}/#${number}` : (r.stderr || r.stdout).split('\n')[0] }
+  },
+
+  async createIssue(draft: IssueDraft, config): Promise<{ key: string; url?: string }> {
+    // GitHub Projects is repo-centric: the story is a repo issue that we then
+    // add to the configured project board.
+    const repo = draft.repoName
+    if (!repo) throw new Error('GitHub Projects needs the originating repo to create an issue')
+    const r = await exec(
+      'gh',
+      ['issue', 'create', '--repo', repo, '--title', draft.title, '--body', draft.description || draft.title],
+      { timeoutMs: 30_000 }
+    )
+    if (r.code !== 0) throw new Error(`gh issue create failed: ${(r.stderr || r.stdout).slice(0, 200)}`)
+    const url = r.stdout.trim().split('\n').pop() ?? ''
+    const num = url.match(/\/issues\/(\d+)/)?.[1] ?? ''
+    const key = num ? `${repo.split('/').pop()}-${num}` : url
+
+    // Best-effort: attach to the project board when one is configured.
+    const owner = config.owner ?? ''
+    const number = config.projectNumber ?? ''
+    if (owner && number && url) {
+      const add = await exec('gh', ['project', 'item-add', number, '--owner', owner, '--url', url], {
+        timeoutMs: 20_000
+      })
+      if (add.code !== 0) {
+        log.warn('gh project item-add failed; issue created but not on the board', {
+          url,
+          err: (add.stderr || add.stdout).slice(0, 120)
+        })
+      }
+    }
+    return { key, url }
   }
 }

@@ -1,6 +1,6 @@
 import { exec } from '../util/exec'
 import { log } from '../log'
-import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
+import type { IssueDraft, ProjectTracker, TrackerIssue, TransitionTarget } from './types'
 
 const PRIORITY_RANK: Record<string, number> = {
   Highest: 5,
@@ -26,6 +26,7 @@ function extractSprint(fields: any): string {
 /** Atlassian Jira adapter via the acli CLI. */
 export const jiraTracker: ProjectTracker = {
   id: 'jira',
+  capabilities: { createIssue: true },
 
   async listAssigned(config): Promise<TrackerIssue[]> {
     const jql = config.jql ?? ''
@@ -84,5 +85,43 @@ export const jiraTracker: ProjectTracker = {
   async checkAuth(): Promise<{ ok: boolean; detail: string }> {
     const r = await exec('acli', ['jira', 'auth', 'status'], { timeoutMs: 10_000 })
     return { ok: r.code === 0, detail: (r.stdout || r.stderr).split('\n')[0] ?? '' }
+  },
+
+  async createIssue(draft: IssueDraft): Promise<{ key: string; url?: string }> {
+    const type = draft.kind === 'bug' ? 'Bug' : 'Task'
+    log.info('creating jira issue', { project: draft.projectKey, type })
+    const r = await exec(
+      'acli',
+      [
+        'jira',
+        'workitem',
+        'create',
+        '--project',
+        draft.projectKey,
+        '--type',
+        type,
+        '--summary',
+        draft.title,
+        '--description',
+        draft.description || draft.title,
+        '--json'
+      ],
+      { timeoutMs: 30_000 }
+    )
+    if (r.code !== 0) throw new Error(`acli create failed: ${(r.stderr || r.stdout).slice(0, 200)}`)
+    // acli output shapes vary by version; pull the key defensively.
+    let key = ''
+    let url: string | undefined
+    try {
+      const parsed = JSON.parse(r.stdout || '{}')
+      const item = Array.isArray(parsed) ? parsed[0] : (parsed.results?.[0] ?? parsed)
+      key = item?.key ?? item?.issueKey ?? ''
+      url = item?.url ?? item?.link ?? undefined
+    } catch {
+      /* fall through to the regex */
+    }
+    if (!key) key = r.stdout.match(/[A-Z][A-Z0-9]+-\d+/)?.[0] ?? ''
+    if (!key) throw new Error(`acli create returned no issue key: ${r.stdout.slice(0, 200)}`)
+    return { key, url }
   }
 }

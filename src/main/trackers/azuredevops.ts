@@ -1,5 +1,5 @@
 import { log } from '../log'
-import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
+import type { IssueDraft, ProjectTracker, TrackerIssue, TransitionTarget } from './types'
 
 /**
  * Azure DevOps adapter.
@@ -102,6 +102,7 @@ function isClosedState(state: string): boolean {
 
 export const azureDevOpsTracker: ProjectTracker = {
   id: 'azuredevops',
+  capabilities: { createIssue: true },
 
   async listAssigned(config): Promise<TrackerIssue[]> {
     const org = (config.org ?? '').trim()
@@ -206,5 +207,53 @@ export const azureDevOpsTracker: ProjectTracker = {
     } catch (err) {
       return { ok: false, detail: `dev.azure.com/${org}: ${String(err).slice(0, 120)}` }
     }
+  },
+
+  async createIssue(draft: IssueDraft, config): Promise<{ key: string; url?: string }> {
+    const org = (config.org ?? '').trim()
+    const pat = config.pat ?? ''
+    const project = (draft.projectKey || config.project || '').trim()
+    if (!org || !pat) throw new Error('azuredevops org/pat not configured')
+    if (!project) throw new Error('no Azure DevOps project to create the work item in')
+    const patch = (title: string, description: string) => [
+      { op: 'add', path: '/fields/System.Title', value: title },
+      { op: 'add', path: '/fields/System.Description', value: description }
+    ]
+    const base = `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}`
+    const create = async (type: string): Promise<any> => {
+      // Work-item creation is POST with a json-patch body — its own fetch here
+      // because the shared apiFetch keys content-type off the method.
+      const url = `${base}/_apis/wit/workitems/$${encodeURIComponent(type)}?api-version=7.1-preview.3`
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json-patch+json',
+          Authorization: authHeader(pat)
+        },
+        body: JSON.stringify(patch(draft.title, draft.description || draft.title))
+      })
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        throw new Error(`HTTP ${resp.status}${text ? `: ${text.slice(0, 160)}` : ''}`)
+      }
+      return resp.json()
+    }
+    // Work-item type names are process-template-specific; fall back to Task.
+    const preferred = draft.kind === 'bug' ? 'Bug' : 'Task'
+    let created: any
+    try {
+      created = await create(preferred)
+    } catch (err) {
+      if (preferred === 'Task') throw err
+      log.warn('azuredevops create failed for type; retrying as Task', {
+        type: preferred,
+        err: String(err).slice(0, 120)
+      })
+      created = await create('Task')
+    }
+    const id = created?.id
+    if (!id) throw new Error('azuredevops work item create returned no id')
+    return { key: String(id), url: created?._links?.html?.href ?? undefined }
   }
 }

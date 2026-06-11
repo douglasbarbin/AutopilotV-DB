@@ -5,6 +5,7 @@ import { useAppState, useNotifications } from './useAppState'
 import { WorkQueue } from './components/WorkQueue'
 import { SessionGrid } from './components/SessionGrid'
 import { ReviewCards } from './components/ReviewCards'
+import { BacklogInsights } from './components/BacklogInsights'
 import { SettingsPanel } from './components/SettingsPanel'
 import { EventsLog } from './components/EventsLog'
 import { BrainPanel } from './components/BrainPanel'
@@ -20,12 +21,13 @@ import logoUrl from '../../../build/icon.png'
 import { api } from './api'
 import type { NotificationPayload } from '@shared/types/ipc'
 
-type Tab = 'work' | 'sessions' | 'reviews' | 'brain' | 'metrics' | 'events' | 'settings'
+type Tab = 'work' | 'sessions' | 'reviews' | 'insights' | 'brain' | 'metrics' | 'events' | 'settings'
 
 const NAV: { id: Tab; label: string; icon: Parameters<typeof Icon>[0]['name'] }[] = [
   { id: 'work', label: 'Work Queue', icon: 'queue' },
   { id: 'sessions', label: 'Sessions', icon: 'sessions' },
   { id: 'reviews', label: 'Reviews', icon: 'reviews' },
+  { id: 'insights', label: 'Backlog & Insights', icon: 'lightbulb' },
   { id: 'brain', label: 'Brain', icon: 'brain' },
   { id: 'metrics', label: 'Metrics', icon: 'chart' },
   { id: 'events', label: 'Activity', icon: 'activity' },
@@ -71,15 +73,21 @@ export function App() {
     state.prReviews.filter((p) => !['submitted', 'dismissed', 'pruned', 'superseded'].includes(p.state)).length +
     state.tasks.filter((t) => t.status !== 'done' && enabledProjects.has(t.projectKey)).length
 
+  const insightsCount =
+    state.followups.filter((f) => f.status === 'candidate').length +
+    state.knowledge.filter((k) => k.status === 'candidate').length
+
   const badges: Partial<Record<Tab, number>> = {
     work: workCount || undefined,
     sessions: activeSessions || undefined,
-    reviews: reviewCount || undefined
+    reviews: reviewCount || undefined,
+    insights: insightsCount || undefined
   }
   const titles: Record<Tab, string> = {
     work: 'Work Queue',
     sessions: 'Sessions',
     reviews: 'Reviews',
+    insights: 'Backlog & Insights',
     brain: 'Brain',
     metrics: 'Metrics',
     events: 'Activity',
@@ -182,6 +190,7 @@ export function App() {
           {tab === 'work' && <WorkQueue state={state} />}
           {tab === 'sessions' && <SessionGrid sessions={state.sessions} theme={state.settings.theme} />}
           {tab === 'reviews' && <ReviewCards state={state} />}
+          {tab === 'insights' && <BacklogInsights state={state} />}
           {tab === 'brain' && <BrainPanel state={state} />}
           {tab === 'metrics' && <MetricsPanel />}
           {tab === 'events' && <EventsLog state={state} />}

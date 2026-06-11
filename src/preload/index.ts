@@ -61,6 +61,14 @@ const api: AutopilotVApi = {
     ipcRenderer.invoke(Channels.metricsGet) as Promise<import('@shared/types/domain').MetricsSnapshot>,
   setRepoVerifyCommand: (repoId: number, command: string) =>
     ipcRenderer.invoke(Channels.repoSetVerifyCommand, repoId, command) as Promise<void>,
+  updateFollowUp: (id, patch) =>
+    ipcRenderer.invoke(Channels.followupUpdate, id, patch) as Promise<void>,
+  setFollowUpStatus: (id, status) =>
+    ipcRenderer.invoke(Channels.followupSetStatus, id, status) as Promise<void>,
+  createStoryFromFollowUp: (id) =>
+    ipcRenderer.invoke(Channels.followupCreateStory, id) as Promise<{ key: string; url?: string }>,
+  setKnowledgeStatus: (id, status) =>
+    ipcRenderer.invoke(Channels.knowledgeSetStatus, id, status) as Promise<void>,
   onState: (cb: (state: AppState) => void) => {
     const fn = (_e: unknown, state: AppState) => cb(state)
     ipcRenderer.on(Channels.evtState, fn)

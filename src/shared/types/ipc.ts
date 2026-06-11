@@ -1,7 +1,9 @@
 // IPC contract between renderer and main. Versioned, typed DTOs only.
 import type {
   AppState,
+  FollowUpStatus,
   HarnessConfig,
+  KnowledgeStatus,
   MetricsSnapshot,
   ReviewAction,
   Settings
@@ -46,6 +48,10 @@ export const Channels = {
   gitGetDiff: 'git.getDiff',
   metricsGet: 'metrics.get',
   repoSetVerifyCommand: 'repo.setVerifyCommand',
+  followupUpdate: 'followup.update',
+  followupSetStatus: 'followup.setStatus',
+  followupCreateStory: 'followup.createStory',
+  knowledgeSetStatus: 'knowledge.setStatus',
   // streams (main -> renderer, send)
   evtState: 'evt.state',
   evtSessionOutput: 'evt.sessionOutput',
@@ -159,6 +165,14 @@ export interface AutopilotVApi {
   getDiff(opts: { worktreeId?: number; prNumber?: number; repoId?: number }): Promise<string>
   getMetrics(): Promise<MetricsSnapshot>
   setRepoVerifyCommand(repoId: number, command: string): Promise<void>
+  updateFollowUp(
+    id: number,
+    patch: { title?: string; description?: string; projectKey?: string; priority?: 'low' | 'medium' | 'high' }
+  ): Promise<void>
+  setFollowUpStatus(id: number, status: FollowUpStatus): Promise<void>
+  /** Create a tracker story from a follow-up (human-gated). */
+  createStoryFromFollowUp(id: number): Promise<{ key: string; url?: string }>
+  setKnowledgeStatus(id: number, status: KnowledgeStatus): Promise<void>
   // subscriptions return an unsubscribe fn
   onState(cb: (state: AppState) => void): () => void
   /**

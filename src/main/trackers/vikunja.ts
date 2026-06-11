@@ -1,5 +1,5 @@
 import { log } from '../log'
-import type { ProjectTracker, TrackerIssue, TransitionTarget } from './types'
+import type { IssueDraft, ProjectTracker, TrackerIssue, TransitionTarget } from './types'
 
 /**
  * Vikunja adapter.
@@ -239,6 +239,7 @@ const IN_FLIGHT_BUCKET = /\b(in[\s_-]?progress|doing|wip|work\s*in\s*progress|wo
 
 export const vikunjaTracker: ProjectTracker = {
   id: 'vikunja',
+  capabilities: { createIssue: true },
 
   async listAssigned(config): Promise<TrackerIssue[]> {
     const base = (config.endpoint ?? '').replace(/\/+$/, '')
@@ -379,5 +380,26 @@ export const vikunjaTracker: ProjectTracker = {
     } catch (err) {
       return { ok: false, detail: `${base}: ${String(err).slice(0, 80)}` }
     }
+  },
+
+  async createIssue(draft: IssueDraft, config): Promise<{ key: string; url?: string }> {
+    const base = (config.endpoint ?? '').replace(/\/+$/, '')
+    if (!base || !config.token) throw new Error('vikunja endpoint/token not configured')
+    // The target project: the draft's projectKey (a Vikunja project id from a
+    // harvested task) wins; fall back to the configured projectId.
+    const projectId = (draft.projectKey || config.projectId || '').trim()
+    if (!projectId) throw new Error('no Vikunja project id to create the task in')
+    // Vikunja priority scale: 0 unset … 5 DO NOW.
+    const priority = draft.priority === 'high' ? 4 : draft.priority === 'low' ? 1 : 3
+    // Yes, PUT creates in Vikunja's API.
+    const created = await apiFetch(
+      'PUT',
+      `${base}/api/v1/projects/${encodeURIComponent(projectId)}/tasks`,
+      config.token,
+      { title: draft.title, description: draft.description || draft.title, priority }
+    )
+    const id = created?.id
+    if (!id) throw new Error('vikunja task create returned no id')
+    return { key: String(id), url: `${base}/tasks/${id}` }
   }
 }
