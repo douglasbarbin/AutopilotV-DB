@@ -184,15 +184,15 @@ function FollowUpCard({ f, state }: { f: FollowUp; state: AppState }) {
           {busy ? 'Creating…' : 'Create story'}
         </button>
         {editing ? (
-          <button className="ghost" onClick={() => void save()}>
+          <button className="btn-ghost" onClick={() => void save()}>
             Save
           </button>
         ) : (
-          <button className="ghost" onClick={() => setEditing(true)}>
+          <button className="btn-ghost" onClick={() => setEditing(true)}>
             Edit
           </button>
         )}
-        <button className="ghost" onClick={() => void api.setFollowUpStatus(f.id, 'dismissed')}>
+        <button className="btn-ghost" onClick={() => void api.setFollowUpStatus(f.id, 'dismissed')}>
           Dismiss
         </button>
       </div>
@@ -225,12 +225,12 @@ function KnowledgeCard({ k, state, candidate = false }: { k: KnowledgeItem; stat
             <button className="approve" onClick={() => void api.setKnowledgeStatus(k.id, 'active')}>
               Accept
             </button>
-            <button className="ghost" onClick={() => void api.setKnowledgeStatus(k.id, 'retired')}>
+            <button className="btn-ghost" onClick={() => void api.setKnowledgeStatus(k.id, 'retired')}>
               Reject
             </button>
           </>
         ) : (
-          <button className="ghost" onClick={() => void api.setKnowledgeStatus(k.id, 'retired')}>
+          <button className="btn-ghost" onClick={() => void api.setKnowledgeStatus(k.id, 'retired')}>
             Retire
           </button>
         )}

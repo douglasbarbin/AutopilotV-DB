@@ -317,6 +317,8 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
   const { forge, config: forgeConfig } = forgeForRepo(repo, settings)
 
   const r = await forge.getPrReadiness(repo.name, task.prNumber, forgeConfig)
+  // Surface reviewer progress on the task card.
+  store.setTaskReviewCounts(task.id, r.approvals, Math.max(r.reviewersRequested ?? 0, r.approvals))
 
   if (r.state === 'MERGED') {
     const t = store.getTask(task.id)

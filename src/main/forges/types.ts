@@ -36,6 +36,8 @@ export interface PrReadiness {
   approvals: number
   changesRequested: boolean
   unresolvedThreads: number
+  /** Reviewers on the PR: still-requested plus those who already reviewed. */
+  reviewersRequested?: number
 }
 
 /** Per-forge config map. Adapters look up the slice they need by `id`. */

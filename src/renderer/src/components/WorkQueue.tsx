@@ -322,6 +322,23 @@ function TaskRow({
           ) : null}
           {task.phase === 'implementing' && ' · working…'}
           {task.phase === 'in_review' && ' · babysitting'}
+          {(task.phase === 'in_review' || task.phase === 'ready_to_merge') &&
+            task.reviewersRequested > 0 && (
+              <span
+                className="reviewer-chip"
+                title={`${task.approvals} of ${task.reviewersRequested} assigned reviewer(s) approved`}
+                style={{
+                  color:
+                    task.approvals >= task.reviewersRequested
+                      ? 'var(--green)'
+                      : task.approvals > 0
+                        ? 'var(--yellow)'
+                        : 'var(--comment)'
+                }}
+              >
+                {' · '}⊙ {task.approvals}/{task.reviewersRequested} approved
+              </span>
+            )}
         </span>
         {['draft', 'in_review', 'ready_to_merge'].includes(task.phase) && (
           <VerifyLine verifications={verifications} active={active} />
@@ -381,28 +398,7 @@ function TaskRow({
             </button>
           </>
         )}
-        {(task.prNumber != null || task.worktreeId != null) && (
-          <button
-            className={`btn-ghost ${showDiff ? 'active' : ''}`}
-            onClick={() => setShowDiff((v) => !v)}
-          >
-            {showDiff ? 'Hide Diff' : 'Diff'}
-          </button>
-        )}
-        {task.worktreeId != null && task.phase !== 'done' && (
-          <button
-            className="btn-ghost"
-            title="Open a kitty terminal in this worktree"
-            onClick={() => void api.openTerminal(task.id)}
-          >
-            Terminal
-          </button>
-        )}
-        {(task.phase === 'implementing' || task.phase === 'in_review' || task.phase === 'revising') && (
-          <button className="btn-ghost" onClick={() => void api.resetDev(task.id)}>
-            Reset
-          </button>
-        )}
+        <TaskMenu task={task} showDiff={showDiff} onToggleDiff={() => setShowDiff((v) => !v)} />
       </div>
       {takingOver && (
         <div className="request-form takeover-form">
@@ -455,5 +451,61 @@ function TaskRow({
         </div>
       )}
     </div>
+  )
+}
+
+
+/**
+ * Secondary task actions collapsed behind one button — the action bar was
+ * growing to 8-10 visible buttons by the in_review phase. Primary, phase-
+ * defining actions (Start/Publish/Merge/Retry/Request changes) stay visible;
+ * utilities live here.
+ */
+function TaskMenu({
+  task,
+  showDiff,
+  onToggleDiff
+}: {
+  task: TrackerTask
+  showDiff: boolean
+  onToggleDiff: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const items: { label: string; danger?: boolean; run: () => void }[] = []
+  if (task.prNumber != null || task.worktreeId != null) {
+    items.push({ label: showDiff ? 'Hide diff' : 'View diff', run: onToggleDiff })
+  }
+  if (task.worktreeId != null && task.phase !== 'done') {
+    items.push({ label: 'Open terminal', run: () => void api.openTerminal(task.id) })
+  }
+  if (['implementing', 'in_review', 'revising'].includes(task.phase)) {
+    items.push({ label: 'Reset task…', danger: true, run: () => void api.resetDev(task.id) })
+  }
+  if (items.length === 0) return null
+  return (
+    <span className="task-menu">
+      <button className="btn-ghost task-menu-btn" title="More actions" onClick={() => setOpen((v) => !v)}>
+        ⋯
+      </button>
+      {open && (
+        <>
+          <span className="task-menu-backdrop" onClick={() => setOpen(false)} />
+          <span className="task-menu-pop">
+            {items.map((it) => (
+              <button
+                key={it.label}
+                className={`task-menu-item ${it.danger ? 'danger' : ''}`}
+                onClick={() => {
+                  setOpen(false)
+                  it.run()
+                }}
+              >
+                {it.label}
+              </button>
+            ))}
+          </span>
+        </>
+      )}
+    </span>
   )
 }

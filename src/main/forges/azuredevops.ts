@@ -443,8 +443,10 @@ export const azureDevOpsForge: Forge = {
     const reviewersUrl = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests/${number}/reviewers?api-version=7.1-preview.1`
     let approvals = 0
     let changesRequested = false
+    let reviewersRequested = 0
     try {
       const revs: AdoReviewer[] = ((await adoFetch('GET', reviewersUrl, pat)) ?? []) as any
+      reviewersRequested = revs.length
       for (const r of revs) {
         if (isApprovedVote(r.vote)) approvals++
         if (isRejectingVote(r.vote)) changesRequested = true
@@ -467,7 +469,7 @@ export const azureDevOpsForge: Forge = {
       unresolvedThreads = changesRequested ? 1 : 0
     }
 
-    return { state, mergeable, statusOk, approvals, changesRequested, unresolvedThreads }
+    return { state, mergeable, statusOk, approvals, changesRequested, unresolvedThreads, reviewersRequested }
   },
 
   async submitReview(

@@ -329,6 +329,15 @@ const MIGRATIONS: Migration[] = [
     ALTER TABLE repos ADD COLUMN runbook TEXT NOT NULL DEFAULT '';
     ALTER TABLE task_verifications ADD COLUMN checkpoint TEXT NOT NULL DEFAULT 'commit';
     `
+  },
+  {
+    // Reviewer progress surfaced on task cards: approvals and assigned
+    // reviewers, refreshed from the forge each babysit tick.
+    version: 17,
+    up: `
+    ALTER TABLE tasks ADD COLUMN approvals INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tasks ADD COLUMN reviewers_requested INTEGER NOT NULL DEFAULT 0;
+    `
   }
 ]
 

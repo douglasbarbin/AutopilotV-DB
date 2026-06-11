@@ -95,6 +95,9 @@ export interface TrackerTask {
    *  count means an additional comment arrived, which re-triggers a round even
    *  on the same commit. */
   addressedThreads: number
+  /** Reviewer progress, refreshed from the forge each babysit tick. */
+  approvals: number
+  reviewersRequested: number
 }
 
 /** When a verification verdict was produced in the dev lifecycle. */

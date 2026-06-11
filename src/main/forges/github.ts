@@ -250,11 +250,14 @@ export const githubForge: Forge = {
       '--repo',
       repoNwo,
       '--json',
-      'state,mergeable,reviewDecision,latestReviews,statusCheckRollup'
+      'state,mergeable,reviewDecision,latestReviews,statusCheckRollup,reviewRequests'
     ])
     const row = JSON.parse(out)
     const latest: any[] = row.latestReviews ?? []
     const approvals = latest.filter((r) => r.state === 'APPROVED').length
+    // Assigned reviewers = still-requested (they leave reviewRequests once they
+    // review) + everyone with a latest review on record.
+    const reviewersRequested = (row.reviewRequests?.length ?? 0) + latest.length
     const changesRequested =
       row.reviewDecision === 'CHANGES_REQUESTED' || latest.some((r) => r.state === 'CHANGES_REQUESTED')
 
@@ -295,7 +298,8 @@ export const githubForge: Forge = {
       statusOk,
       approvals,
       changesRequested,
-      unresolvedThreads
+      unresolvedThreads,
+      reviewersRequested
     }
   },
 

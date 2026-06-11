@@ -5,15 +5,28 @@ import { TRACKERS, trackerDescriptor } from '@shared/types/trackers'
 import { FORGES, forgeDescriptor } from '@shared/types/forges'
 import { api } from '../api'
 
-const STEPS = ['Welcome', 'Environment', 'Forge', 'Tracker', 'Brain', 'Harnesses', 'Done'] as const
+/**
+ * First-run walkthrough. Design rules:
+ *  - the step rail is labeled and clickable (revisit anything already seen);
+ *  - every step says WHY it matters in one line before asking for anything;
+ *  - role defaults are radios (one per role — the UI now matches the backend
+ *    invariant instead of looking like independent checkboxes);
+ *  - the final step is a LIVE readiness checklist derived from real state,
+ *    not a static congratulation.
+ */
+const STEPS = ['Welcome', 'Environment', 'Forge', 'Tracker', 'Brain', 'Agents', 'Launch'] as const
 
 export function Onboarding({ state }: { state: AppState }) {
   const s = state.settings
   const [step, setStep] = useState(0)
+  const [visited, setVisited] = useState(1)
   const patch = (p: Partial<Settings>) => void api.updateSettings(p)
 
-  const next = () => setStep((i) => Math.min(i + 1, STEPS.length - 1))
-  const back = () => setStep((i) => Math.max(i - 1, 0))
+  const go = (i: number) => {
+    const clamped = Math.max(0, Math.min(i, STEPS.length - 1))
+    setStep(clamped)
+    setVisited((v) => Math.max(v, clamped + 1))
+  }
   const finish = () => {
     void api.updateSettings({ onboarded: true })
     void api.setBrainRunning(true)
@@ -29,11 +42,15 @@ export function Onboarding({ state }: { state: AppState }) {
           </div>
           <div className="onboard-steps">
             {STEPS.map((label, i) => (
-              <span
+              <button
                 key={label}
-                className={`onboard-dot ${i === step ? 'active' : ''} ${i < step ? 'done' : ''}`}
-                title={label}
-              />
+                className={`onboard-step-pill ${i === step ? 'active' : ''} ${i < step ? 'done' : ''}`}
+                disabled={i >= visited}
+                onClick={() => go(i)}
+              >
+                <span className="onboard-dot-mini">{i < step ? '✓' : i + 1}</span>
+                <span className="onboard-step-label">{label}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -45,29 +62,31 @@ export function Onboarding({ state }: { state: AppState }) {
           {step === 3 && <TrackerStep s={s} patch={patch} />}
           {step === 4 && <BrainStep s={s} patch={patch} />}
           {step === 5 && <HarnessStep state={state} />}
-          {step === 6 && <DoneStep />}
+          {step === 6 && <LaunchStep state={state} />}
         </div>
 
         <div className="onboard-foot">
-          <button
-            className="btn-ghost"
-            onClick={() => void api.updateSettings({ onboarded: true })}
-          >
-            Skip
-          </button>
+          <div className="onboard-foot-left">
+            <button className="btn-ghost" onClick={() => void api.updateSettings({ onboarded: true })}>
+              Skip setup
+            </button>
+            <span className="onboard-progress muted">
+              Step {step + 1} of {STEPS.length}
+            </span>
+          </div>
           <div className="onboard-nav">
             {step > 0 && (
-              <button className="btn-ghost" onClick={back}>
+              <button className="btn-ghost" onClick={() => go(step - 1)}>
                 Back
               </button>
             )}
             {step < STEPS.length - 1 ? (
-              <button className="btn-primary" onClick={next}>
-                Next
+              <button className="btn-primary" onClick={() => go(step + 1)}>
+                {step === 0 ? "Let's set up" : 'Next'}
               </button>
             ) : (
               <button className="btn-primary" onClick={finish}>
-                Finish & start the brain
+                Start the brain 🚀
               </button>
             )}
           </div>
@@ -80,31 +99,39 @@ export function Onboarding({ state }: { state: AppState }) {
 function Welcome() {
   return (
     <div className="onboard-step">
-      <h2>Welcome aboard 🚀</h2>
+      <h2>Your work, on autopilot</h2>
       <p>
-        AutopilotV finds the work that's yours — PRs awaiting your review and tasks
-        assigned to you — and drives it through coding agents in real terminals,
-        stopping for your approval and merge.
+        AutopilotV finds the work that&apos;s yours — PRs awaiting your review and tasks assigned to
+        you — and drives it through coding agents in real terminals. You stay in the loop for the
+        decisions that matter: approving reviews and merging PRs.
       </p>
-      <p className="muted">A few minutes of setup and you'll be flying. Here's the recommended kit:</p>
-      <ul className="onboard-list">
-        <li>
-          <strong>git</strong> + a <strong>code forge</strong> — GitHub (uses the <code>gh</code>{' '}
-          CLI) or Azure DevOps Repos (REST API).
-        </li>
-        <li>
-          A <strong>project tracker</strong> — Jira (acli), GitHub Projects, Azure DevOps Boards,
-          or Vikunja.
-        </li>
-        <li>
-          At least one <strong>coding agent CLI</strong> — Claude Code is recommended; Pi, Codex,
-          Cursor, and OpenCode also work.
-        </li>
-        <li>
-          Optional: a <strong>local LLM</strong> (e.g. LM Studio) for the brain or local-model
-          harnesses.
-        </li>
-      </ul>
+      <div className="onboard-tiles">
+        <div className="onboard-tile">
+          <span className="onboard-tile-icon">🔭</span>
+          <strong>Reviews, prepared</strong>
+          <span>PRs are reviewed in sandboxed worktrees; you approve with one click.</span>
+        </div>
+        <div className="onboard-tile">
+          <span className="onboard-tile-icon">🛠️</span>
+          <strong>Tasks, shipped</strong>
+          <span>Claim → implement → draft PR → review rounds → ready for your merge.</span>
+        </div>
+        <div className="onboard-tile">
+          <span className="onboard-tile-icon">✅</span>
+          <strong>Changes, proven</strong>
+          <span>Per-repo runbooks build, run, and e2e-test every change before you look.</span>
+        </div>
+        <div className="onboard-tile">
+          <span className="onboard-tile-icon">🧠</span>
+          <strong>Knowledge, kept</strong>
+          <span>Merged work becomes backlog candidates and learned conventions.</span>
+        </div>
+      </div>
+      <p className="muted">
+        Recommended kit: <strong>git</strong>, a forge CLI (<code>gh</code> or Azure DevOps), your
+        tracker&apos;s CLI, and at least one coding agent (Claude Code recommended; Pi, Codex,
+        Cursor, OpenCode also work).
+      </p>
     </div>
   )
 }
@@ -121,10 +148,13 @@ function EnvStep() {
   }
   useEffect(run, [])
 
-  const icon = (it: EnvItem) =>
-    !it.present ? '✗' : it.authed === false ? '!' : '✓'
+  const icon = (it: EnvItem) => (!it.present ? '✗' : it.authed === false ? '!' : '✓')
   const cls = (it: EnvItem) =>
     !it.present ? (it.role === 'optional' ? 'warn' : 'bad') : it.authed === false ? 'warn' : 'ok'
+
+  const required = env?.filter((e) => e.role === 'required') ?? []
+  const requiredOk = required.filter((e) => e.present && e.authed !== false).length
+  const issues = env?.filter((e) => !e.present || e.authed === false).length ?? 0
 
   return (
     <div className="onboard-step">
@@ -134,9 +164,13 @@ function EnvStep() {
           {loading ? 'Checking…' : 'Re-check'}
         </button>
       </div>
-      <p className="muted">
-        Required items must be green to operate; recommended/optional improve coverage.
-      </p>
+      {env && (
+        <p className={`onboard-env-summary ${requiredOk === required.length ? 'ok' : 'bad'}`}>
+          {requiredOk === required.length
+            ? `✓ All ${required.length} required tools are ready${issues ? ` — ${issues} optional item(s) could improve coverage` : ''}.`
+            : `${requiredOk}/${required.length} required tools ready — fix the red items below before launch.`}
+        </p>
+      )}
       {!env && <div className="muted">Scanning…</div>}
       <div className="env-list">
         {env?.map((it) => (
@@ -169,8 +203,8 @@ function ForgeStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) =>
     <div className="onboard-step">
       <h2>Code forge</h2>
       <p className="muted">
-        Pick the forge that hosts your PRs. Tracker and forge are independent — you can use Jira
-        with GitHub, or Azure DevOps Boards with GitHub, etc.
+        Where your PRs live. Forge and tracker are independent — Jira with GitHub, Azure Boards with
+        GitHub, any combination works.
       </p>
       <label>
         Forge
@@ -260,6 +294,7 @@ function TrackerStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) 
   return (
     <div className="onboard-step">
       <h2>Project tracker</h2>
+      <p className="muted">Where your assigned tasks come from — and where finished follow-ups become stories.</p>
       <label>
         Tracker
         <select value={s.tracker} onChange={(e) => patch({ tracker: e.target.value })}>
@@ -313,15 +348,18 @@ function BrainStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) =>
   return (
     <div className="onboard-step">
       <h2>Brain LLM</h2>
-      <p className="muted">The brain calls an LLM only for judgment (reviewing, unsticking, triage).</p>
+      <p className="muted">
+        Orchestration is deterministic; an LLM is consulted only for judgment — reviewing a change,
+        unsticking a stalled session, deduplicating suggestions.
+      </p>
       <label>
         Provider
         <select
           value={s.llmProvider}
           onChange={(e) => patch({ llmProvider: e.target.value as Settings['llmProvider'] })}
         >
-          <option value="local">Local model (OpenAI-compatible)</option>
-          <option value="harness">A harness (headless -p)</option>
+          <option value="local">Local model (OpenAI-compatible, e.g. LM Studio)</option>
+          <option value="harness">A harness run headless (no API key needed)</option>
         </select>
       </label>
       {s.llmProvider === 'local' && (
@@ -342,11 +380,11 @@ function BrainStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) =>
         </>
       )}
       {s.llmProvider === 'harness' && (
-        <p className="muted">Flag a harness as the Brain default in the next step.</p>
+        <p className="muted">Pick the Brain-default agent on the next step.</p>
       )}
       <div className="row">
         <button className="btn-soft" disabled={test.status === 'running'} onClick={() => void runTest()}>
-          {test.status === 'running' ? 'Testing…' : 'Test'}
+          {test.status === 'running' ? 'Testing…' : 'Test connection'}
         </button>
         {test.status !== 'idle' && test.status !== 'running' && (
           <span className={`test-result ${test.status}`}>
@@ -359,11 +397,17 @@ function BrainStep({ s, patch }: { s: Settings; patch: (p: Partial<Settings>) =>
 }
 
 function HarnessStep({ state }: { state: AppState }) {
+  const roles = [
+    { key: 'isReviewDefault', label: 'review' },
+    { key: 'isBrainDefault', label: 'brain' },
+    { key: 'isCodingDefault', label: 'coding' }
+  ] as const
   return (
     <div className="onboard-step">
-      <h2>Harnesses & roles</h2>
+      <h2>Agents &amp; roles</h2>
       <p className="muted">
-        Enable the agents you have, and pick one default for each role (review · brain · coding).
+        Enable the agent CLIs you have installed, then pick exactly one default per role: who
+        reviews PRs, who powers brain judgment (if harness-backed), and who writes code.
       </p>
       <div className="harness-table">
         <div className="harness-trow harness-thead onboard-htrow">
@@ -387,45 +431,74 @@ function HarnessStep({ state }: { state: AppState }) {
                 onChange={(e) => void api.upsertHarness({ ...h, enabled: e.target.checked })}
               />
             </div>
-            <div className="hg-cell">
-              <input
-                type="checkbox"
-                checked={h.isReviewDefault}
-                onChange={(e) => void api.upsertHarness({ ...h, isReviewDefault: e.target.checked })}
-              />
-            </div>
-            <div className="hg-cell">
-              <input
-                type="checkbox"
-                checked={h.isBrainDefault}
-                onChange={(e) => void api.upsertHarness({ ...h, isBrainDefault: e.target.checked })}
-              />
-            </div>
-            <div className="hg-cell">
-              <input
-                type="checkbox"
-                checked={h.isCodingDefault}
-                onChange={(e) => void api.upsertHarness({ ...h, isCodingDefault: e.target.checked })}
-              />
-            </div>
+            {roles.map((r) => (
+              <div className="hg-cell" key={r.key}>
+                <input
+                  type="radio"
+                  name={`onboard-role-${r.label}`}
+                  checked={h[r.key]}
+                  onChange={() => void api.upsertHarness({ ...h, [r.key]: true })}
+                />
+              </div>
+            ))}
           </div>
         ))}
       </div>
+      <p className="muted">Selecting a default automatically clears the previous one — one per role.</p>
     </div>
   )
 }
 
-function DoneStep() {
+function LaunchStep({ state }: { state: AppState }) {
+  const s = state.settings
+  // LIVE readiness, derived from real state — not a static congratulation.
+  const forgeReady =
+    s.forge === 'github'
+      ? !!s.githubUsername && (s.watchRepos.length > 0 || !!s.githubReviewFilter)
+      : Object.values(s.forgeConfig?.[s.forge] ?? {}).some(Boolean)
+  const trackerReady = Object.values(s.trackerConfig?.[s.tracker] ?? {}).some(Boolean)
+  const enabledHarnesses = state.harnesses.filter((h) => h.enabled)
+  const hasCoding = state.harnesses.some((h) => h.enabled && h.isCodingDefault)
+  const hasReview = state.harnesses.some((h) => h.enabled && h.isReviewDefault)
+  const clonedRepos = state.repos.filter((r) => r.cloneState === 'present').length
+
+  const items: { ok: boolean; label: string; hint?: string }[] = [
+    { ok: forgeReady, label: `Forge: ${s.forge}`, hint: forgeReady ? undefined : 'configure it on the Forge step' },
+    { ok: trackerReady, label: `Tracker: ${s.tracker}`, hint: trackerReady ? undefined : 'configure it on the Tracker step' },
+    { ok: true, label: `Brain: ${s.llmProvider === 'local' ? `local (${s.llmModel})` : 'harness-backed'}` },
+    {
+      ok: enabledHarnesses.length > 0 && hasCoding && hasReview,
+      label: `Agents: ${enabledHarnesses.length} enabled`,
+      hint: hasCoding && hasReview ? undefined : 'set a coding and a review default on the Agents step'
+    },
+    {
+      ok: clonedRepos > 0,
+      label: `Repos cloned locally: ${clonedRepos}`,
+      hint: clonedRepos > 0 ? undefined : `clone watched repos under ${s.cloneParentDir} (works later too)`
+    }
+  ]
+
   return (
     <div className="onboard-step">
-      <h2>You're set 🛰️</h2>
+      <h2>Ready to launch</h2>
+      <div className="onboard-checklist">
+        {items.map((it) => (
+          <div className={`onboard-check ${it.ok ? 'ok' : 'todo'}`} key={it.label}>
+            <span className="onboard-check-icon">{it.ok ? '✓' : '○'}</span>
+            <span>{it.label}</span>
+            {it.hint && <span className="muted"> — {it.hint}</span>}
+          </div>
+        ))}
+      </div>
       <p>
-        Finishing turns the brain on. It polls on an interval; hit <strong>Tick now</strong> any time
-        to refresh immediately. Watch its decisions in the <strong>Brain</strong> tab, drive sessions
-        in <strong>Sessions</strong>, and approve reviews in <strong>Reviews</strong>.
+        Starting the brain begins the poll loop: it pulls your reviews and tasks, spawns sessions,
+        and surfaces decisions. Watch its reasoning in <strong>Brain</strong>, drive terminals in{' '}
+        <strong>Sessions</strong>, approve in <strong>Reviews</strong>, and turn merged work into
+        stories in <strong>Backlog &amp; Insights</strong>.
       </p>
       <p className="muted">
-        You can re-run this walkthrough anytime from <strong>Settings → Setup walkthrough</strong>.
+        Unchecked items are fine to fix later. Re-run this walkthrough anytime from{' '}
+        <strong>Settings → Setup walkthrough</strong>.
       </p>
     </div>
   )

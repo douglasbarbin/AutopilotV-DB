@@ -25,6 +25,8 @@ interface TaskRow {
   verified_sha: string
   addressed_sha: string
   addressed_threads: number
+  approvals: number
+  reviewers_requested: number
 }
 
 function rowToTask(r: TaskRow): TrackerTask {
@@ -49,7 +51,9 @@ function rowToTask(r: TaskRow): TrackerTask {
     updatedAt: r.updated_at,
     verifiedSha: r.verified_sha ?? '',
     addressedSha: r.addressed_sha ?? '',
-    addressedThreads: r.addressed_threads ?? 0
+    addressedThreads: r.addressed_threads ?? 0,
+    approvals: r.approvals ?? 0,
+    reviewersRequested: r.reviewers_requested ?? 0
   }
 }
 
@@ -160,6 +164,13 @@ export function setTaskRepo(id: number, repoId: number): void {
 
 export function setTaskWorktree(id: number, worktreeId: number): void {
   getDb().prepare('UPDATE tasks SET worktree_id = ? WHERE id = ?').run(worktreeId, id)
+}
+
+/** Reviewer progress shown on task cards, refreshed each babysit tick. */
+export function setTaskReviewCounts(id: number, approvals: number, reviewersRequested: number): void {
+  getDb()
+    .prepare('UPDATE tasks SET approvals = ?, reviewers_requested = ? WHERE id = ?')
+    .run(approvals, reviewersRequested, id)
 }
 
 /** Record the commit SHA last run through the verification gate (theme B). */
