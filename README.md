@@ -112,6 +112,78 @@ instead of typing prompts.
 - A brain reasoning feed, an audit log, OS notifications, a "drop a terminal in this
   worktree" action, and a one-click database wipe.
 
+## 📘 Runbooks
+
+A **runbook** is a repo's "init to runnable" written down as data, so AutopilotV
+can build, run, and end-to-end-test any project without having opinions about
+how that project works. AutopilotV supplies the lifecycle slots, substitution
+variables, caching, readiness waiting, and evidence collection; every command
+inside a slot is plain shell that **you** define.
+
+**Where it lives** (first match wins):
+
+1. A **Settings override** — paste into *Settings → Repos → \<repo\> → Runbook…*
+   (live yaml validation; saving invalidates cached verdicts so the same commit
+   re-verifies).
+2. A **`RUNBOOK.md` committed in the repo** — a plain-English narrative for
+   agents plus one fenced `yaml` block for the orchestrator. Read from the
+   trunk clone, never the task worktree, so a branch under test cannot weaken
+   its own verification.
+3. The legacy per-repo **verify command** as a single `test` step.
+
+No runbook at all = the classic behavior (auto-detected `npm test` or skip).
+
+```yaml
+version: 1
+setup:                              # cached on a content hash of cacheOn files
+  - run: npm ci
+    cacheOn: ["package-lock.json"]
+secrets:                            # runs ONCE against your unlocked secrets
+  - run: op inject -i config.template.json -o config.json   # manager (e.g. 1Password);
+    produces: [config.json]         # outputs are encrypted with the OS keychain
+    cacheTtlHours: 24               # and re-materialized per worktree from cache
+build:
+  - dotnet build My.slnx
+test:
+  - npm test
+app:                                # how to get it RUNNING
+  run: dotnet run --project AppHost # any launcher works:
+  detached: true                    # one that exits after starting the real app
+  persist: [.seed.lock.json]        # app-created state that roams across worktrees
+  ports: { web: auto }              # 'auto' → AutopilotV allocates {port:web} and
+  ready: { url: "http://localhost:{port:web}/health" }   # concurrent instances are OK
+  teardown: my-tool stop            # otherwise one instance per repo at a time
+e2e:
+  - run: npx cypress run --config baseUrl=http://localhost:{port:web}
+    artifacts: [cypress/screenshots, cypress/videos]      # copied out as evidence
+    gate: advisory                  # or blocking, once you trust it
+```
+
+**How verification uses it.** The `test` slot runs per pushed commit. The
+**full pipeline** — setup → secrets → build → test → app boot → e2e — runs at
+two checkpoints: when the PR reaches **draft** (the change is proven runnable
+before a human looks at it) and again at the **ready-to-merge gate** (skipped
+when the draft checkpoint already proved the same commit). Every stage records
+its own verdict; task cards show per-stage chips with click-through to the
+exact command, captured output, and artifacts, plus a live "verifying now"
+indicator while a pipeline runs. Failures auto-spawn a fix session — except
+secrets failures, which notify you instead (no agent can unlock 1Password) —
+guarded to one attempt per commit.
+
+**Secrets without the prompt fatigue.** A `secrets` step executes once against
+your unlocked secrets manager; the files it `produces` are encrypted at rest
+(OS keychain via safeStorage) and re-materialized into every future worktree
+from the cache. Declared outputs are pre-deleted before fresh runs so
+inject-style tools (`op inject` without `-f`) stay re-runnable. *Refresh
+secrets* in Settings forces a fresh round. `app.persist` does the same for
+app-generated state (e.g. an emulator seed lock), so machine-global state
+isn't re-initialized — and the secrets tool isn't re-run — per worktree.
+
+**Running apps** appear in a registry on the Sessions tab (status, ports,
+logs, one-click stop) and are torn down cleanly: teardown command first, then
+the process group. Agents never run any of this blindly — the runbook's
+narrative is what tells them how the repo works.
+
 ## 🛰️ How it works
 
 ```

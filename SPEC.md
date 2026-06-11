@@ -416,22 +416,43 @@ stale items) so the set stays signal rather than noise.
 **Settings.** `autoPublish` (default off → awaits your Publish), `requiredApprovals`
 (default 1).
 
-**Runbooks & staged verification.** A repo's `RUNBOOK.md` (or a Settings
-override; legacy `verify_command` as fallback) declares optional lifecycle
-slots: `setup` (cached on declared input files), `secrets` (run once, outputs
-encrypted+cached, re-materialized per worktree — e.g. 1Password `op inject`),
-`build`, `test`, `app` (run + readiness probe + teardown, opt-in `{port:name}`
-allocation), and `e2e` (per-step `gate: blocking|advisory`, artifact capture).
-Verification runs the `test` slot per pushed commit and the FULL pipeline at
-two checkpoints: when the PR reaches **draft** (the change is proven runnable
-before a human looks) and at the **ready_to_merge gate** (skipped when the
-draft checkpoint already proved the same SHA). Each stage records a
-`task_verifications` row (`checkpoint` column); failures spawn the
-verification-fix session. The runbook is read from the TRUNK clone, never the
-task worktree, so a branch under test cannot weaken its own verification.
-App instances are supervised in-process (one per repo unless the runbook
-declares `auto` ports; global `maxRunningApps` cap) and surfaced in the UI
-with logs and one-click stop.
+**Runbooks & staged verification.** A repo's runbook is its "init to
+runnable" as data — AutopilotV stays project-agnostic by supplying only the
+lifecycle slots, substitution variables ({port:name}, {instance}, {worktree}),
+caching, readiness waiting, and evidence collection; every command in a slot is
+operator-defined shell.
+
+Resolution (first match wins): the per-repo Settings override (stored in the
+DB; saving clears verified-SHA caches and stamps verdicts with a runbook
+revision so edits re-verify the same commit) → `RUNBOOK.md` committed in the
+repo, read from the TRUNK clone, never the task worktree (a branch under test
+cannot weaken its own verification) → legacy `verify_command` as a single test
+step. Overrides only materialize into worktrees (git-excluded) when the repo
+has no RUNBOOK.md of its own; stages execute from the DB regardless.
+
+Slots: `setup` (cached on a git-pathspec content hash of declared `cacheOn`
+inputs) · `secrets` (run once against the user's unlocked secrets manager;
+declared `produces` files are encrypted via safeStorage and re-materialized
+per worktree from cache with a TTL; outputs are pre-deleted before fresh runs
+so inject-style tools stay re-runnable; failures notify the operator and never
+spawn fix sessions) · `build` · `test` · `app` (run + readiness probe by URL or
+log pattern + teardown; `detached: true` for launchers that exit after starting
+the real app, e.g. `aspire start`; `persist` roams app-created state like
+emulator seed locks across worktrees; `auto` ports opt into allocation and
+concurrent instances, otherwise one instance per repo; global maxRunningApps
+cap) · `e2e` (per-step `gate: blocking|advisory`; declared artifacts are copied
+out as evidence before teardown).
+
+Checkpoints: the `test` slot runs per pushed commit; the FULL pipeline runs
+when the PR reaches **draft** (auto-publish is held until the change is proven
+runnable) and at the **ready_to_merge gate** (skipped when the draft
+checkpoint proved the same SHA under the same runbook revision). Each stage
+records a `task_verifications` row (`checkpoint` column) surfaced as
+clickable per-stage chips with a live "verifying now" indicator; a synthetic
+`pipeline` rollup carries the verdict. Failures spawn the verification-fix
+session, guarded to one attempt per (task, commit); unmergeable PRs dispatch a
+conflict-resolution session under the same per-commit guard. Running apps are
+supervised in-process and surfaced in the UI with logs and one-click stop.
 
 ---
 
