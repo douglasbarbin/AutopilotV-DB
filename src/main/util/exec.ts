@@ -6,6 +6,29 @@ export interface ExecResult {
   code: number
 }
 
+/**
+ * Strip package-manager lifecycle variables from a child environment.
+ *
+ * AutopilotV is usually launched via an npm script, so process.env carries
+ * npm's per-invocation vars (npm_config_local_prefix, npm_package_*,
+ * npm_lifecycle_*, INIT_CWD, NODE_ENV, …) pointing at AutopilotV's OWN repo.
+ * Inherited by agent sessions and verify commands running in OTHER repos'
+ * worktrees, they corrupt npm's command/config resolution there (reported
+ * from the field: a stale npm_config_local_prefix broke installs inside a
+ * session worktree). Every child process — PTY sessions, exec'd CLIs, shell
+ * verify commands — gets a cleaned environment.
+ */
+const LIFECYCLE_VARS = new Set(['INIT_CWD', 'NODE_ENV', 'PNPM_SCRIPT_SRC_DIR', 'PROJECT_CWD'])
+
+export function sanitizeChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(env)) {
+    if (/^npm_/i.test(k) || LIFECYCLE_VARS.has(k)) continue
+    out[k] = v
+  }
+  return out
+}
+
 export interface ExecOptions {
   cwd?: string
   env?: NodeJS.ProcessEnv
@@ -28,7 +51,9 @@ export function exec(
       args,
       {
         cwd: opts.cwd,
-        env: opts.env ?? process.env,
+        // Sanitized unconditionally: explicit envs are built from process.env
+        // by callers (sandbox, llm provider) and inherit the same leak.
+        env: sanitizeChildEnv(opts.env ?? process.env),
         timeout: opts.timeoutMs ?? 60_000,
         maxBuffer: 32 * 1024 * 1024
       },

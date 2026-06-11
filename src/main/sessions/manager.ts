@@ -8,6 +8,7 @@ import * as store from '../store'
 import type { HarnessConfig, SessionStatus, WorkKind } from '@shared/types/domain'
 import type { SessionOutputChunk } from '@shared/types/ipc'
 import { preparePiLocalModel, substitute } from './localHarness'
+import { sanitizeChildEnv } from '../util/exec'
 import { quiescenceFingerprint } from '../util/ansi'
 import {
   KICKOFF_POLL_MS,
@@ -122,7 +123,10 @@ export class SessionManager extends EventEmitter {
       cols: 120,
       rows: 32,
       cwd: opts.cwd,
-      env: {
+      // sanitizeChildEnv strips npm lifecycle vars (npm_config_local_prefix,
+      // INIT_CWD, …) that point at AutopilotV's own repo and would corrupt
+      // npm resolution inside the session's worktree.
+      env: sanitizeChildEnv({
         ...opts.env,
         // Advertise full 24-bit truecolor support so tools like bat, delta,
         // lazygit, rich, etc. render with their full color output without
@@ -131,7 +135,7 @@ export class SessionManager extends EventEmitter {
         COLORTERM: 'truecolor',
         ...lmEnv,
         ...(opts.harness.launch.env ?? {})
-      } as { [k: string]: string }
+      }) as { [k: string]: string }
     })
 
     const transcriptPath = join(this.transcriptsDir, `session-${sessionId}.log`)
