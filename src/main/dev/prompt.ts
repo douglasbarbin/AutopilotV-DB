@@ -12,11 +12,11 @@ export const PR_URL_FILE = SIGNAL.IMPL
  * "Your local changes would be overwritten by merge".
  */
 export const AGENTS_MERGE_UNBLOCK =
-  'If git refuses a merge/rebase/checkout because of local changes to AGENTS.md (it carries an injected block between the TASKMAN:BEGIN/TASKMAN:END markers, protected with skip-worktree), unblock it like this:\n' +
+  'If git refuses a merge/rebase/checkout because of local changes to AGENTS.md (it carries an injected block between the AUTOPILOTV:BEGIN/AUTOPILOTV:END markers, protected with skip-worktree), unblock it like this:\n' +
   '1. Save the injected block: `cp AGENTS.md /tmp/AGENTS.injected.md`\n' +
   '2. Unprotect and restore: `git update-index --no-skip-worktree AGENTS.md && git checkout -- AGENTS.md`\n' +
   '3. Complete the merge/rebase.\n' +
-  '4. Reapply: append the saved block (everything from `<!-- TASKMAN:BEGIN` through `TASKMAN:END -->` in /tmp/AGENTS.injected.md) back onto AGENTS.md, then re-protect: `git update-index --skip-worktree AGENTS.md`\n' +
+  '4. Reapply: append the saved block (everything from `<!-- AUTOPILOTV:BEGIN` through `AUTOPILOTV:END -->` in /tmp/AGENTS.injected.md) back onto AGENTS.md, then re-protect: `git update-index --skip-worktree AGENTS.md`\n' +
   'Never commit the injected block.'
 
 /**

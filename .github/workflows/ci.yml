@@ -70,7 +70,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: taskman-${{ matrix.os }}
+          name: autopilotv-${{ matrix.os }}
           path: |
             release/*.dmg
             release/*.zip

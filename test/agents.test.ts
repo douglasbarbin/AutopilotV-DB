@@ -10,7 +10,7 @@ const TEMPLATE = '## Standards\n- be excellent'
 describe('injectAgentsTemplate', () => {
   let dir: string
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'taskman-agents-'))
+    dir = mkdtempSync(join(tmpdir(), 'autopilotv-agents-'))
     execFileSync('git', ['init', '-q'], { cwd: dir })
   })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
@@ -18,9 +18,9 @@ describe('injectAgentsTemplate', () => {
   it('creates AGENTS.md with the injected block when none exists', async () => {
     await injectAgentsTemplate(dir, TEMPLATE)
     const out = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(out).toContain('TASKMAN:BEGIN')
+    expect(out).toContain('AUTOPILOTV:BEGIN')
     expect(out).toContain('be excellent')
-    expect(out).toContain('TASKMAN:END')
+    expect(out).toContain('AUTOPILOTV:END')
   })
 
   it('appends below existing content and is idempotent', async () => {
@@ -30,8 +30,21 @@ describe('injectAgentsTemplate', () => {
     const out = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(out).toContain('# Project rules')
     expect(out).toContain('Existing line.')
-    expect(out.match(/TASKMAN:BEGIN/g)?.length).toBe(1)
-    expect(out.indexOf('Existing line.')).toBeLessThan(out.indexOf('TASKMAN:BEGIN'))
+    expect(out.match(/AUTOPILOTV:BEGIN/g)?.length).toBe(1)
+    expect(out.indexOf('Existing line.')).toBeLessThan(out.indexOf('AUTOPILOTV:BEGIN'))
+  })
+
+  it('replaces a block injected under a previous product name', async () => {
+    writeFileSync(
+      join(dir, 'AGENTS.md'),
+      '# Rules\n\n<!-- OLDNAME:BEGIN injected coding standards (not committed) -->\nstale standards\n<!-- OLDNAME:END -->\n'
+    )
+    await injectAgentsTemplate(dir, TEMPLATE)
+    const out = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(out).toContain('# Rules')
+    expect(out).not.toContain('OLDNAME')
+    expect(out).not.toContain('stale standards')
+    expect(out.match(/AUTOPILOTV:BEGIN/g)?.length).toBe(1)
   })
 
   it('does nothing when the template is empty', async () => {
@@ -84,7 +97,7 @@ describe('injectAgentsTemplate', () => {
     git('update-index', '--no-skip-worktree', 'AGENTS.md') // 2. unprotect
     git('checkout', '--', 'AGENTS.md')
     git('merge', 'main') // 3. merge completes
-    const block = saved.slice(saved.indexOf('<!-- TASKMAN:BEGIN')) // 4. reapply
+    const block = saved.slice(saved.indexOf('<!-- AUTOPILOTV:BEGIN')) // 4. reapply
     writeFileSync(join(dir, 'AGENTS.md'), readFileSync(join(dir, 'AGENTS.md'), 'utf8') + '\n' + block)
     git('update-index', '--skip-worktree', 'AGENTS.md')
 

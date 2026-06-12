@@ -22,7 +22,7 @@ const OPEN_REVIEW_STATES: PrReviewState[] = [
 
 /**
  * Begin reviewing a PR: provision an isolated, sandboxed worktree and spawn the
- * review harness. The session writes TASKMAN_REVIEW.json which is harvested on a
+ * review harness. The session writes .review.json which is harvested on a
  * later tick. Returns the session id, or null if it could not start.
  */
 export async function startReview(pr: PrReview): Promise<number | null> {

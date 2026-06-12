@@ -11,11 +11,11 @@ describe('sanitizeChildEnv', () => {
     const out = sanitizeChildEnv({
       PATH: '/usr/bin',
       HOME: '/Users/x',
-      npm_config_local_prefix: '/Users/x/RiderProjects/Taskman',
+      npm_config_local_prefix: '/Users/x/RiderProjects/AutopilotV',
       npm_lifecycle_event: 'dev',
       npm_package_name: 'autopilotv',
       npm_node_execpath: '/usr/local/bin/node',
-      INIT_CWD: '/Users/x/RiderProjects/Taskman',
+      INIT_CWD: '/Users/x/RiderProjects/AutopilotV',
       NODE_ENV: 'development',
       PNPM_SCRIPT_SRC_DIR: '/somewhere',
       OPENAI_API_KEY: 'local',

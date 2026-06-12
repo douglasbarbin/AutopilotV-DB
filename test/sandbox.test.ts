@@ -13,7 +13,7 @@ describe('buildReviewSandbox (security invariant)', () => {
   let dir: string
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'taskman-sandbox-'))
+    dir = mkdtempSync(join(tmpdir(), 'autopilotv-sandbox-'))
   })
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })

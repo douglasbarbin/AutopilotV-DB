@@ -6,8 +6,12 @@ import * as store from '../store'
 import type { Repo, Worktree } from '@shared/types/domain'
 import { ALL_SIGNALS } from './signals'
 
-const AGENTS_BEGIN = '<!-- TASKMAN:BEGIN injected coding standards (not committed) -->'
-const AGENTS_END = '<!-- TASKMAN:END -->'
+const AGENTS_BEGIN = '<!-- AUTOPILOTV:BEGIN injected coding standards (not committed) -->'
+const AGENTS_END = '<!-- AUTOPILOTV:END -->'
+// Generic form of the markers: re-injection strips any previously injected
+// block regardless of the product name it was injected under, so worktrees
+// created before a rename don't accumulate duplicate blocks.
+const ANY_AGENTS_BLOCK = /\n*<!-- [A-Z]+:BEGIN injected coding standards \(not committed\) -->[\s\S]*?<!-- [A-Z]+:END -->\n*/g
 
 /**
  * Inject the configured agent-instructions template at the bottom of the
@@ -33,8 +37,7 @@ export async function injectAgentsTemplate(worktreePath: string, content: string
 
   // Strip any prior injected block, then append a fresh one at the bottom.
   let base = existsSync(agentsPath) ? readFileSync(agentsPath, 'utf8') : ''
-  const re = new RegExp(`\\n*${escapeRe(AGENTS_BEGIN)}[\\s\\S]*?${escapeRe(AGENTS_END)}\\n*`, 'g')
-  base = base.replace(re, '').replace(/\s+$/, '')
+  base = base.replace(ANY_AGENTS_BLOCK, '').replace(/\s+$/, '')
   const block = `${base ? base + '\n\n' : ''}${AGENTS_BEGIN}\n${trimmed}\n${AGENTS_END}\n`
   writeFileSync(agentsPath, block)
 
@@ -46,10 +49,6 @@ export async function injectAgentsTemplate(worktreePath: string, content: string
     await addToGitExclude(worktreePath, ['AGENTS.md'])
   }
   log.info('injected AGENTS.md template', { worktreePath, tracked })
-}
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
