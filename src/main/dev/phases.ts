@@ -346,8 +346,25 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
     return
   }
   if (r.state === 'CLOSED') {
+    if (task.sessionId && sessionManager.isLive(task.sessionId)) {
+      sessionManager.kill(task.sessionId, 'pr closed')
+    }
     store.completeTask(task.id)
     note('dev', `PR #${task.prNumber} for ${task.issueKey} was closed — no longer tracking.`, {}, 'warn')
+    // Closed without merge = work skipped; the worktree has no further value.
+    void (async () => {
+      try {
+        if (task.worktreeId) {
+          const wt = store.getWorktree(task.worktreeId)
+          if (wt && !wt.prunedAt) {
+            const { pruneWorktree } = await import('../worktree/manager')
+            await pruneWorktree(wt, { force: true })
+          }
+        }
+      } catch (err) {
+        log.warn('post-close worktree prune failed', { taskId: task.id, err: String(err) })
+      }
+    })()
     return
   }
 
@@ -627,7 +644,10 @@ export async function finishMerged(task: TrackerTask): Promise<void> {
         const wt = store.getWorktree(task.worktreeId)
         if (wt && !wt.prunedAt) {
           const { pruneWorktree } = await import('../worktree/manager')
-          await pruneWorktree(wt)
+          // Force: the PR is merged, so anything uncommitted is run byproduct
+          // (aspire.config.json, codegen churn, local config) — without force
+          // the dirty-worktree guard blocks and nothing ever retries.
+          await pruneWorktree(wt, { force: true })
         }
       }
     } catch (err) {
