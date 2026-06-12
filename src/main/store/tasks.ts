@@ -123,9 +123,18 @@ export function completeTask(id: number): void {
     .run(id)
 }
 
+/**
+ * The working set: every task still in flight, plus a 7-day window of finished
+ * ones. Long-done tasks stay in the DB (reopen detection reads by issue_key)
+ * but stop riding every tick filter and every state push.
+ */
 export function listTasks(): TrackerTask[] {
   const rows = getDb()
-    .prepare('SELECT * FROM tasks ORDER BY priority DESC, updated_at DESC')
+    .prepare(
+      `SELECT * FROM tasks
+       WHERE phase != 'done' OR updated_at >= datetime('now', '-7 days')
+       ORDER BY priority DESC, updated_at DESC`
+    )
     .all() as TaskRow[]
   return rows.map(rowToTask)
 }

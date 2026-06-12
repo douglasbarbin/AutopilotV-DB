@@ -162,8 +162,12 @@ async function captureReview(
   store.recordEvent('review.captured', { prReviewId: pr.id, recommendation: parsed.recommendation }, { sessionId })
 
   // Review work is done: end the session and prune the (read-only) worktree.
+  // The prune is filesystem work nothing downstream depends on — run it
+  // off-tick so a slow delete can't hold up the rest of the harvest pass.
   sessionManager.kill(sessionId, 'review captured')
-  await pruneWorktree(worktree)
+  void pruneWorktree(worktree).catch((err) =>
+    log.warn('review worktree prune failed', { prReviewId: pr.id, err: String(err) })
+  )
 
   store.setPrReviewState(pr.id, 'awaiting_user')
   store.setClaimState('review', pr.id, 'done')
@@ -187,7 +191,11 @@ export async function supersedeReview(pr: PrReview, reason: string): Promise<voi
       if (sessionManager.isLive(sess.id)) sessionManager.kill(sess.id, `superseded: ${reason}`)
       if (sess.worktreeId) {
         const wt = store.getWorktree(sess.worktreeId)
-        if (wt && !wt.prunedAt) await pruneWorktree(wt)
+        if (wt && !wt.prunedAt) {
+          void pruneWorktree(wt).catch((err) =>
+            log.warn('superseded review worktree prune failed', { prReviewId: pr.id, err: String(err) })
+          )
+        }
       }
     }
   }
@@ -282,7 +290,7 @@ export async function approveOnly(prReviewId: number): Promise<void> {
  * records the decision.
  */
 export async function actOnReview(reviewId: number, action: ReviewAction): Promise<void> {
-  const review = store.listReviews().find((r) => r.id === reviewId)
+  const review = store.getReview(reviewId)
   if (!review) throw new Error(`review ${reviewId} not found`)
   const pr = store.getPrReview(review.prReviewId)
   if (!pr) throw new Error(`pr_review ${review.prReviewId} not found`)

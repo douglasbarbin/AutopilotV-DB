@@ -1,8 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { ActiveVerification, AppState, PrReview, TaskVerification, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
 import { DiffView } from './DiffView'
 import { TYPE_COLOR, taskStateLabel } from '../theme'
+
+// Stable empty array so rows without verifications don't get a fresh prop each render.
+const NO_VERIFICATIONS: TaskVerification[] = []
 
 const VERIFY_COLOR: Record<TaskVerification['status'], string> = {
   pass: 'var(--green)',
@@ -21,6 +25,16 @@ export function WorkQueue({ state }: { state: AppState }) {
   )
   const sprint = openTasks.find((t) => t.sprint)?.sprint
   const autoPublish = state.settings.autoPublish
+  // One pass instead of an O(tasks × verifications) filter per row.
+  const verificationsByTask = useMemo(() => {
+    const m = new Map<number, TaskVerification[]>()
+    for (const v of state.taskVerifications) {
+      const list = m.get(v.taskId)
+      if (list) list.push(v)
+      else m.set(v.taskId, [v])
+    }
+    return m
+  }, [state.taskVerifications])
 
   return (
     <div className="work-queue">
@@ -67,7 +81,7 @@ export function WorkQueue({ state }: { state: AppState }) {
             key={`t${t.id}`}
             task={t}
             autoPublish={autoPublish}
-            verifications={state.taskVerifications.filter((v) => v.taskId === t.id)}
+            verifications={verificationsByTask.get(t.id) ?? NO_VERIFICATIONS}
             active={state.activeVerification?.taskId === t.id ? state.activeVerification : null}
           />
         ))}
@@ -229,7 +243,10 @@ function VerifyLine({
 function VerificationDetail({ v, onClose }: { v: TaskVerification; onClose: () => void }) {
   const d = v.detail as { command?: string; output?: string; log?: string; artifacts?: string[]; gate?: string }
   const output = d.output ?? d.log ?? ''
-  return (
+  // Portal to <body>: cards have backdrop-filter (own stacking context) and a
+  // hover transform (becomes the fixed-position containing block), so rendering
+  // in place leaves the modal trapped behind sibling cards and mis-anchored.
+  return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal app-logs" onClick={(e) => e.stopPropagation()}>
         <div className="runbook-head">
@@ -257,7 +274,8 @@ function VerificationDetail({ v, onClose }: { v: TaskVerification; onClose: () =
         )}
         <pre>{output || '(no output captured)'}</pre>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

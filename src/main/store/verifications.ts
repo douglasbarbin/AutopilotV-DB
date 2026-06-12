@@ -92,6 +92,22 @@ export function listVerificationsForTask(taskId: number): TaskVerification[] {
 }
 
 /**
+ * Retention sweep: drop old verdicts for FINISHED tasks only. In-flight tasks
+ * keep their full history — the verdict-by-SHA cache is what lets a tick skip
+ * re-running a pipeline, so pruning those would cause spurious re-verification.
+ */
+export function pruneVerifications(days = 30): number {
+  const info = getDb()
+    .prepare(
+      `DELETE FROM task_verifications
+       WHERE created_at < datetime('now', ?)
+         AND task_id IN (SELECT id FROM tasks WHERE phase = 'done')`
+    )
+    .run(`-${days} days`)
+  return info.changes
+}
+
+/**
  * Latest verification per (task, kind) — what the WorkQueue renders as a badge.
  * Bounded to keep the AppState push small; reviews/tasks are dozens, not thousands.
  */

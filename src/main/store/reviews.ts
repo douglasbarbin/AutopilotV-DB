@@ -17,13 +17,10 @@ interface PrReviewRow {
   forge: string | null
 }
 
-function rowToPrReview(r: PrReviewRow): PrReview {
-  // resolve the repo's name lazily via the repos table; this is one extra
-  // SELECT per row. We accept that here because listPrReviews runs in buildState
-  // and the number of PRs is small (dozens, not thousands).
-  const repo = getDb().prepare('SELECT forge FROM repos WHERE id = ?').get(r.repo_id) as
-    | { forge: string | null }
-    | undefined
+/** Rows from queries that LEFT JOIN repos carry the repo's forge as repo_forge. */
+type PrReviewJoinedRow = PrReviewRow & { repo_forge?: string | null }
+
+function rowToPrReview(r: PrReviewJoinedRow): PrReview {
   return {
     id: r.id,
     prNumber: r.pr_number,
@@ -38,9 +35,14 @@ function rowToPrReview(r: PrReviewRow): PrReview {
     sessionId: r.session_id,
     discoveredAt: r.discovered_at,
     updatedAt: r.updated_at,
-    forge: r.forge ?? repo?.forge ?? 'github'
+    forge: r.forge ?? r.repo_forge ?? 'github'
   }
 }
+
+/** Shared SELECT that resolves the owning repo's forge in the same query —
+ *  the previous per-row `SELECT forge FROM repos` was an N+1 on every push. */
+const PR_REVIEW_SELECT =
+  'SELECT pr_reviews.*, repos.forge AS repo_forge FROM pr_reviews LEFT JOIN repos ON repos.id = pr_reviews.repo_id'
 
 export function upsertPrReview(p: {
   prNumber: number
@@ -87,22 +89,33 @@ export function upsertPrReview(p: {
 
 export function getPrReviewByNumber(repoId: number, prNumber: number): PrReview | null {
   const row = getDb()
-    .prepare('SELECT * FROM pr_reviews WHERE repo_id = ? AND pr_number = ?')
-    .get(repoId, prNumber) as PrReviewRow | undefined
+    .prepare(`${PR_REVIEW_SELECT} WHERE pr_reviews.repo_id = ? AND pr_reviews.pr_number = ?`)
+    .get(repoId, prNumber) as PrReviewJoinedRow | undefined
   return row ? rowToPrReview(row) : null
 }
 
 export function getPrReview(id: number): PrReview | null {
-  const row = getDb().prepare('SELECT * FROM pr_reviews WHERE id = ?').get(id) as
-    | PrReviewRow
+  const row = getDb().prepare(`${PR_REVIEW_SELECT} WHERE pr_reviews.id = ?`).get(id) as
+    | PrReviewJoinedRow
     | undefined
   return row ? rowToPrReview(row) : null
 }
 
+/**
+ * The working set: reviews still expecting action, plus a 7-day window of
+ * resolved ones (the UI hides resolved rows; the brain only schedules open
+ * states). Old resolved rows stay in the DB but no longer ride every tick
+ * and every state push.
+ */
 export function listPrReviews(): PrReview[] {
   const rows = getDb()
-    .prepare('SELECT * FROM pr_reviews ORDER BY discovered_at DESC')
-    .all() as PrReviewRow[]
+    .prepare(
+      `${PR_REVIEW_SELECT}
+       WHERE pr_reviews.state IN ('discovered', 'provisioning', 'review_in_progress', 'awaiting_user')
+          OR pr_reviews.updated_at >= datetime('now', '-7 days')
+       ORDER BY pr_reviews.discovered_at DESC`
+    )
+    .all() as PrReviewJoinedRow[]
   return rows.map(rowToPrReview)
 }
 
@@ -165,9 +178,17 @@ export function insertReview(r: {
   return Number(info.lastInsertRowid)
 }
 
-export function listReviews(): ReviewSummary[] {
-  const rows = getDb().prepare('SELECT * FROM reviews ORDER BY created_at DESC').all() as ReviewRow[]
+/** Recent review summaries — the UI only renders the latest per open PR. */
+export function listReviews(limit = 200): ReviewSummary[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM reviews ORDER BY id DESC LIMIT ?')
+    .all(limit) as ReviewRow[]
   return rows.map(rowToReview)
+}
+
+export function getReview(id: number): ReviewSummary | null {
+  const row = getDb().prepare('SELECT * FROM reviews WHERE id = ?').get(id) as ReviewRow | undefined
+  return row ? rowToReview(row) : null
 }
 
 export function getLatestReviewForPr(prReviewId: number): ReviewSummary | null {

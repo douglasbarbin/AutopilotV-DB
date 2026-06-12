@@ -19,6 +19,20 @@ vi.mock('electron', () => ({
 import { __openInMemoryDbForTesting, closeDb } from '../src/main/db'
 import * as store from '../src/main/store'
 import { detectVerifyCommand, verifyTaskForMerge } from '../src/main/dev/verify'
+import { waitForVerificationQueue } from '../src/main/dev/verifyQueue'
+import type { MergeVerificationResult } from '../src/main/dev/verify'
+
+/**
+ * verifyTaskForMerge now ENQUEUES fresh verifications on the background queue
+ * and reports pending; the verdict is read through the verified-SHA cache on a
+ * later call. This helper models one full round trip: enqueue, drain, re-read.
+ */
+async function verifyToCompletion(taskId: number): Promise<MergeVerificationResult> {
+  const first = await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+  if (!first.pending) return first
+  await waitForVerificationQueue()
+  return verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+}
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' })
@@ -93,9 +107,17 @@ describe('verifyTaskForMerge', () => {
     return { taskId }
   }
 
+  it('reports pending while the background verification runs', async () => {
+    const { taskId } = seed('exit 0')
+    const first = await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    expect(first.ok).toBe(false)
+    expect(first.pending).toBe(true)
+    await waitForVerificationQueue()
+  })
+
   it('passes and records a pass verification when the command exits 0', async () => {
     const { taskId } = seed('exit 0')
-    const r = await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    const r = await verifyToCompletion(taskId)
     expect(r.ok).toBe(true)
     const v = store.listVerificationsForTask(taskId).find((x) => x.kind === 'command')
     expect(v?.status).toBe('pass')
@@ -104,8 +126,9 @@ describe('verifyTaskForMerge', () => {
 
   it('fails (blocks) and records a fail when the command exits non-zero', async () => {
     const { taskId } = seed('exit 1')
-    const r = await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    const r = await verifyToCompletion(taskId)
     expect(r.ok).toBe(false)
+    expect(r.pending).toBeFalsy()
     expect(r.failureSummary).toBeTruthy()
     const v = store.listVerificationsForTask(taskId).find((x) => x.kind === 'command')
     expect(v?.status).toBe('fail')
@@ -113,17 +136,18 @@ describe('verifyTaskForMerge', () => {
 
   it('does not re-run on an unchanged commit (verified_sha short-circuit)', async () => {
     const { taskId } = seed('exit 1')
-    await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    await verifyToCompletion(taskId)
     const after1 = store.listVerificationsForTask(taskId).length
     const r2 = await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
     const after2 = store.listVerificationsForTask(taskId).length
     expect(r2.ok).toBe(false) // cached fail verdict
+    expect(r2.pending).toBeFalsy() // a real verdict, not a queued job
     expect(after2).toBe(after1) // no new verification row
   })
 
   it('skips (does not block) when no verify command is configured or detected', async () => {
     const { taskId } = seed('')
-    const r = await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    const r = await verifyToCompletion(taskId)
     expect(r.ok).toBe(true)
     const v = store.listVerificationsForTask(taskId).find((x) => x.kind === 'command')
     expect(v?.status).toBe('skipped')
@@ -131,13 +155,13 @@ describe('verifyTaskForMerge', () => {
 
   it('re-verifies after a new commit (changed SHA)', async () => {
     const { taskId } = seed('exit 1')
-    await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    await verifyToCompletion(taskId)
     const before = store.listVerificationsForTask(taskId).length
     // New commit → new SHA.
     writeFileSync(join(repoDir, 'a.txt'), 'two')
     git(repoDir, 'add', '-A')
     git(repoDir, 'commit', '-qm', 'second')
-    await verifyTaskForMerge(store.getTask(taskId)!, store.getSettings())
+    await verifyToCompletion(taskId)
     expect(store.listVerificationsForTask(taskId).length).toBeGreaterThan(before)
   })
 })

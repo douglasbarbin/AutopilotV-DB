@@ -15,6 +15,7 @@ import { log } from '../log'
 import * as store from '../store'
 import { exec, execShell } from '../util/exec'
 import { forgeForRepo } from '../forges'
+import { tickState } from '../brain/tickState'
 import { makeProvider, judgeValidated, SpecConformanceSchema } from '../llm/provider'
 import type { Repo, Settings, TrackerTask, Worktree, TaskVerification } from '@shared/types/domain'
 
@@ -122,16 +123,37 @@ export async function runSpecConformance(
 export interface MergeVerificationResult {
   /** Whether promotion to ready_to_merge is allowed (command did not fail). */
   ok: boolean
-  /** Present only when a fresh command verification ran and failed. */
+  /** True while this commit's verification is queued or running in the
+   *  background — not a verdict; check again next tick. */
+  pending?: boolean
+  /** Present only when this commit's verification failed. */
   failureSummary?: string
   /** Pipeline stage that failed ('secrets' is operator-fixable, not agent-fixable). */
   failureStage?: string
 }
 
+/** Reconstruct the failure detail callers feed the fix-session prompt from a
+ *  persisted verdict row (pipeline rollups carry failedStage/failureSummary;
+ *  command rows carry command/output). */
+export function failureFromVerdict(v: TaskVerification): { failureSummary: string; failureStage?: string } {
+  const d = v.detail as { failedStage?: string; failureSummary?: string; output?: string }
+  return {
+    failureStage: d.failedStage,
+    failureSummary:
+      d.failureSummary ?? `${v.summary}${d.output ? `\n\n${String(d.output).slice(-2000)}` : ''}`
+  }
+}
+
 /**
  * Verify a task at its current commit and decide whether it may be promoted to
  * ready_to_merge. Returns ok=true (non-blocking) for skipped/error/already-verified
- * commits; ok=false only when this commit's command verification failed.
+ * commits; ok=false only when this commit's verification failed — or, with
+ * pending=true, while the verification job is still running in the background.
+ *
+ * The heavy work (pipeline / command run / spec check) does NOT run here: it
+ * is enqueued on the verification queue so a multi-minute pipeline never
+ * blocks the brain tick. The verdict lands in task_verifications and the
+ * verified-SHA cache; the next tick reads it through the cached path below.
  */
 export async function verifyTaskForMerge(
   task: TrackerTask,
@@ -153,14 +175,40 @@ export async function verifyTaskForMerge(
     const last = store
       .listVerificationsForTask(task.id)
       .find((v) => (v.kind === 'command' || v.kind === 'pipeline') && v.commitSha === sha)
-    return { ok: !last || last.status !== 'fail' }
+    if (!last || last.status !== 'fail') return { ok: true }
+    return { ok: false, ...failureFromVerdict(last) }
   }
 
-  // Fresh commit → gating verification + spec check (advisory). When the repo
-  // declares runbook stages, the staged pipeline replaces the single command;
-  // the merge gate skips the full pipeline when the draft checkpoint already
-  // proved this exact SHA.
-  let gate: MergeVerificationResult
+  // Fresh commit → queue the gating verification and report pending.
+  const { isVerificationPending, enqueueVerification } = await import('./verifyQueue')
+  const key = `verify:${task.id}:merge_gate:${sha}`
+  if (!isVerificationPending(key)) {
+    store.recordBrainNote({
+      tick: tickState.current,
+      category: 'dev',
+      message: `${task.issueKey}: merge-gate verification queued for ${sha.slice(0, 7)} — running in the background.`,
+      detail: { key: task.issueKey }
+    })
+    enqueueVerification(key, () => runMergeVerification(task, repo, worktree, settings, sha))
+  }
+  return { ok: false, pending: true }
+}
+
+/**
+ * The heavy half of the merge gate, run on the background verification queue.
+ * Persists the gate verdict (pipeline rollup or command row), the advisory
+ * spec check, and the verified-SHA marker that the cached path reads.
+ */
+async function runMergeVerification(
+  task: TrackerTask,
+  repo: Repo,
+  worktree: Worktree,
+  settings: Settings,
+  sha: string
+): Promise<void> {
+  // When the repo declares runbook stages, the staged pipeline replaces the
+  // single command; the merge gate skips the full pipeline when the draft
+  // checkpoint already proved this exact SHA.
   const { runPipeline, hasRunbookStages, verdictIsCurrent } = await import('./pipeline')
   if (hasRunbookStages(repo)) {
     const draftPass = store.getPipelineVerdict(task.id, 'draft', sha)
@@ -175,10 +223,8 @@ export async function verifyTaskForMerge(
         detail: { via: 'draft' },
         checkpoint: 'merge_gate'
       })
-      gate = { ok: true }
     } else {
-      const r = await runPipeline(task, repo, worktree, settings, 'merge_gate', sha)
-      gate = { ok: r.ok, failureSummary: r.failureSummary, failureStage: r.failedStage }
+      await runPipeline(task, repo, worktree, settings, 'merge_gate', sha)
     }
   } else {
     const cmd = await runCommandVerification(repo, worktree, settings)
@@ -195,12 +241,6 @@ export async function verifyTaskForMerge(
     if (cmd.status === 'fail') {
       store.recordEvent('dev.verify_failed', { taskId: task.id, prNumber: task.prNumber, sha }, { level: 'warn' })
       log.warn('verification failed', { taskId: task.id, summary: cmd.summary })
-      gate = {
-        ok: false,
-        failureSummary: `${cmd.summary}\n\n${String((cmd.detail as { output?: string }).output ?? '').slice(-2000)}`
-      }
-    } else {
-      gate = { ok: true }
     }
   }
 
@@ -219,5 +259,4 @@ export async function verifyTaskForMerge(
   }
 
   store.setTaskVerifiedSha(task.id, sha)
-  return gate
 }

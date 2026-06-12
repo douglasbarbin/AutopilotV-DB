@@ -99,9 +99,16 @@ export function getSession(id: number): Session | null {
   return row ? rowToSession(row) : null
 }
 
+/** Live sessions plus a 24h tail of finished ones — the UI only renders live
+ *  sessions, so ancient exited rows have no reason to ride every state push. */
 export function listSessions(): Session[] {
   const rows = getDb()
-    .prepare('SELECT * FROM sessions ORDER BY started_at DESC')
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE status IN ('starting','running','stalled','needs_human')
+          OR started_at >= datetime('now', '-1 day')
+       ORDER BY started_at DESC`
+    )
     .all() as SessionRow[]
   return rows.map(rowToSession)
 }

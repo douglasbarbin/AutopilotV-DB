@@ -3,28 +3,30 @@ import * as store from './store'
 import { brain } from './brain/brain'
 import { appInstances } from './apps/instances'
 import { getActiveVerification } from './dev/pipeline'
-import { Channels } from '@shared/types/ipc'
 import type { StateDelta, StateSlice } from '@shared/types/ipc'
 import type { AppState } from '@shared/types/domain'
 
 /**
- * Builds the full AppState and pushes deltas to the renderer.
+ * Builds the AppState working set and pushes deltas to the renderer.
  *
  * History:
- *   Originally this was `buildState()` re-running 9 SQL queries on every
- *   IPC handler call (every claim, every settings change, every tick…).
- *   At low volume that's fine; at higher volume it becomes wasteful, and
- *   the renderer's single `useState` re-renders the whole tree on every push.
+ *   Originally this was `buildState()` re-running 9 unbounded SQL queries on
+ *   every IPC handler call, sending the full state twice (evt.state +
+ *   state.delta), and marking EVERY slice changed on every push (fresh array
+ *   references made the old `!==` comparison always true) — so the renderer
+ *   re-rendered the whole tree on every push regardless of what changed.
  *
- *   Now the main process keeps a small "dirty" set of slices and emits a
- *   `StateDelta` containing just the changed slices. The renderer's
- *   `useAppStateSlice('tasks')` hook compares the new reference to the old
- *   and only triggers a re-render when the slice actually changed.
- *
- *   Backwards compatibility: `buildState()` is still available (used by
- *   `snapshot()` at boot) and `pushState()` still emits the full state, but
- *   it also sends a `state.delta` event so renderer hooks can opt in to
- *   slice-level updates without giving up the full-state fallback.
+ *   Now:
+ *   - the store queries are bounded to the working set (open work, live
+ *     sessions/worktrees, recent history), so push cost stops growing with
+ *     the lifetime of the database;
+ *   - `computeDelta()` compares slice CONTENT (serialized) and reuses the
+ *     previous object reference for unchanged slices, so `delta.changed` is
+ *     accurate and the renderer's slice subscribers only re-render when their
+ *     data actually changed;
+ *   - only `state.delta` is sent — nothing listened on the legacy full-state
+ *     channel, and sending both doubled IPC serialization. `buildState()` is
+ *     still used by `snapshot()` at boot.
  */
 
 export function buildState(): AppState {
@@ -35,15 +37,15 @@ export function buildState(): AppState {
     reviews: store.listReviews(),
     taskVerifications: store.listRecentVerifications(),
     sessions: store.listSessions(),
-    worktrees: store.listWorktrees(),
+    worktrees: store.listLiveWorktrees(),
     harnesses: store.listHarnesses(),
     repos: store.listRepos(),
     integrations: store.getIntegrationHealth(),
     settings: store.getSettings(),
     events: store.listEvents(200),
     brainNotes: store.listBrainNotes(200),
-    followups: store.listFollowUps(),
-    knowledge: store.listKnowledge(),
+    followups: store.listFollowUpsForState(),
+    knowledge: store.listKnowledgeForState(),
     appInstances: appInstances.list(),
     activeVerification: getActiveVerification(),
     appVersion: app.getVersion(),
@@ -51,23 +53,38 @@ export function buildState(): AppState {
   }
 }
 
+const SLICES: StateSlice[] = [
+  'tasks',
+  'trackerProjects',
+  'prReviews',
+  'reviews',
+  'taskVerifications',
+  'sessions',
+  'worktrees',
+  'harnesses',
+  'repos',
+  'integrations',
+  'settings',
+  'events',
+  'brainNotes',
+  'followups',
+  'knowledge',
+  'appInstances',
+  'activeVerification',
+  'brain'
+]
+
 let lastState: AppState | null = null
+const sliceJson = new Map<StateSlice, string>()
 let pushScheduled = false
 
 /**
- * Mark slices as changed since the last push. Slices that aren't dirty won't
- * be included in the next delta, so subscribers can re-render only when their
- * slice's reference actually changed.
- *
- * The legacy "push everything" behavior is preserved by calling
- * `markDirty('all')` from places that want a full state refresh.
+ * Mark slices as changed since the last push. Kept as the call-site API;
+ * the dirty set itself is derived in computeDelta from slice content, which
+ * also catches writes that forgot to mark anything.
  */
 export function markDirty(...slices: StateSlice[]): void {
-  // Coalesce: we always send the union of dirty slices on the next tick.
   pushState()
-  // markDirty is currently a no-op for the dirty set (we always recompute
-  // everything in buildState). The hook is here so future per-slice caching
-  // (in 1.3 follow-ups) can plug in without changing call sites.
   void slices
 }
 
@@ -77,62 +94,33 @@ export function pushState(): void {
   pushScheduled = true
   setImmediate(() => {
     pushScheduled = false
-    const state = buildState()
-    const delta = computeDelta(state)
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(Channels.evtState, state)
-      win.webContents.send('state.delta', delta)
+    try {
+      const delta = computeDelta(buildState())
+      if (delta.changed.length === 0) return // nothing actually changed
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('state.delta', delta)
+      }
+    } catch (err) {
+      // Thrown on a later event-loop tick, so no caller can catch it — e.g.
+      // background jobs pushing under a partial electron mock in tests.
+      console.warn('state push failed', err)
     }
   })
 }
 
-function computeDelta(state: AppState): StateDelta {
+function computeDelta(fresh: AppState): StateDelta {
   const changed: StateSlice[] = []
-  if (!lastState) {
-    changed.push(
-      'tasks',
-      'trackerProjects',
-      'prReviews',
-      'reviews',
-      'taskVerifications',
-      'sessions',
-      'worktrees',
-      'harnesses',
-      'repos',
-      'integrations',
-      'settings',
-      'events',
-      'brainNotes',
-      'followups',
-      'knowledge',
-      'appInstances',
-      'activeVerification',
-      'brain'
-    )
-  } else {
-    if (state.tasks !== lastState.tasks) changed.push('tasks')
-    if (state.trackerProjects !== lastState.trackerProjects) changed.push('trackerProjects')
-    if (state.prReviews !== lastState.prReviews) changed.push('prReviews')
-    if (state.reviews !== lastState.reviews) changed.push('reviews')
-    if (state.taskVerifications !== lastState.taskVerifications) changed.push('taskVerifications')
-    if (state.sessions !== lastState.sessions) changed.push('sessions')
-    if (state.worktrees !== lastState.worktrees) changed.push('worktrees')
-    if (state.harnesses !== lastState.harnesses) changed.push('harnesses')
-    if (state.repos !== lastState.repos) changed.push('repos')
-    if (state.integrations !== lastState.integrations) changed.push('integrations')
-    if (state.settings !== lastState.settings) changed.push('settings')
-    if (state.events !== lastState.events) changed.push('events')
-    if (state.brainNotes !== lastState.brainNotes) changed.push('brainNotes')
-    if (state.followups !== lastState.followups) changed.push('followups')
-    if (state.knowledge !== lastState.knowledge) changed.push('knowledge')
-    if (state.appInstances !== lastState.appInstances) changed.push('appInstances')
-    if (
-      state.activeVerification?.taskId !== lastState.activeVerification?.taskId ||
-      state.activeVerification?.stage !== lastState.activeVerification?.stage
-    ) {
-      changed.push('activeVerification')
+  const state = { ...fresh }
+  for (const k of SLICES) {
+    const json = JSON.stringify(fresh[k] ?? null)
+    if (lastState && sliceJson.get(k) === json) {
+      // Same content: keep the previous reference so slice subscribers'
+      // reference comparison (and React memoization) sees "unchanged".
+      ;(state as Record<StateSlice, unknown>)[k] = (lastState as Record<StateSlice, unknown>)[k]
+    } else {
+      sliceJson.set(k, json)
+      changed.push(k)
     }
-    if (state.brain !== lastState.brain) changed.push('brain')
   }
   lastState = state
   return { version: 1, changed, state }

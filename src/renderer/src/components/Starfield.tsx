@@ -92,6 +92,134 @@ export function Starfield({ active }: { active: boolean }) {
       stars.push(s)
     }
 
+    // Nebula textures, built ONCE per mount. A big radial gradient at low
+    // alpha only has a handful of discrete 8-bit alpha steps to spend across
+    // hundreds of pixels — every step shows up as a visible ring (the "burn
+    // in" band look). Accumulating ~300 tiny puffs at ~0.04 alpha instead
+    // dithers the falloff into a smooth, organically dense cloud. Per frame
+    // we only tint and blit the texture, which is also cheaper than building
+    // gradients every render.
+    const NEB_TEX = 512
+    interface NebulaLayer {
+      tex: HTMLCanvasElement
+      tint: HTMLCanvasElement
+      tctx: CanvasRenderingContext2D
+    }
+    /**
+     * One cloud layer, built once. The haze is ~300 tiny ultra-low-alpha puffs
+     * accumulated around a few cluster centers — they dither each other into a
+     * smooth band-free falloff (one big radial gradient at low alpha shows its
+     * 8-bit alpha steps as rings). The `structured` core layer additionally
+     * gets wispy filaments, bright knots, and dark dust lanes carved out with
+     * destination-out strokes — the things that make a real nebula (Trifid,
+     * Horsehead) read as a cloud with anatomy instead of out-of-focus light.
+     */
+    const makeNebulaLayer = (structured: boolean): NebulaLayer => {
+      const tex = document.createElement('canvas')
+      tex.width = tex.height = NEB_TEX
+      const g = tex.getContext('2d')!
+      // The outer-haze layer sits offset to one side so the two hues separate
+      // into adjacent regions (pink core / blue fringe) instead of stacking.
+      const off = structured ? 0 : (Math.random() < 0.5 ? -1 : 1) * (0.1 + Math.random() * 0.08)
+      const centers = Array.from({ length: 3 + (Math.random() < 0.5 ? 1 : 0) }, () => ({
+        x: NEB_TEX * (0.38 + off + Math.random() * 0.24),
+        y: NEB_TEX * (0.38 - off * 0.6 + Math.random() * 0.24),
+        r: NEB_TEX * (0.12 + Math.random() * 0.12)
+      }))
+      const puff = (x: number, y: number, r: number, a: number) => {
+        if (x - r < 2 || x + r > NEB_TEX - 2 || y - r < 2 || y + r > NEB_TEX - 2) return
+        const grad = g.createRadialGradient(x, y, 0, x, y, r)
+        grad.addColorStop(0, `rgba(255,255,255,${a})`)
+        grad.addColorStop(1, 'rgba(255,255,255,0)')
+        g.fillStyle = grad
+        g.fillRect(x - r, y - r, r * 2, r * 2)
+      }
+      for (let i = 0; i < (structured ? 300 : 240); i++) {
+        const c = centers[i % centers.length]
+        const ang = Math.random() * Math.PI * 2
+        // Center-weighted spread (mean of two uniforms): dense core, wispy edge.
+        const dist = ((Math.random() + Math.random()) / 2) * c.r * 1.7
+        puff(
+          c.x + Math.cos(ang) * dist,
+          c.y + Math.sin(ang) * dist * 0.8,
+          NEB_TEX * (0.05 + Math.random() * 0.09),
+          0.04
+        )
+      }
+
+      // Soft random-walk strokes: filaments when drawn, dust lanes when erased.
+      const strands = (alpha: number, widthScale: number, count: number, erase: boolean) => {
+        if (erase) g.globalCompositeOperation = 'destination-out'
+        g.lineCap = 'round'
+        g.shadowColor = 'rgba(255,255,255,0.6)'
+        g.shadowBlur = 16
+        for (let p = 0; p < count; p++) {
+          const c = centers[Math.floor(Math.random() * centers.length)]
+          let x = c.x + (Math.random() - 0.5) * c.r
+          let y = c.y + (Math.random() - 0.5) * c.r
+          let ang = Math.random() * Math.PI * 2
+          g.strokeStyle = `rgba(255,255,255,${alpha})`
+          g.lineWidth = NEB_TEX * widthScale * (0.7 + Math.random() * 0.6)
+          g.beginPath()
+          g.moveTo(x, y)
+          for (let s = 0; s < 7; s++) {
+            ang += (Math.random() - 0.5) * 1.1
+            // Steer wandering strands back toward the middle — never off the rim.
+            const dx = x - NEB_TEX / 2
+            const dy = y - NEB_TEX / 2
+            if (Math.hypot(dx, dy) > NEB_TEX * 0.3) ang = Math.atan2(-dy, -dx) + (Math.random() - 0.5)
+            const step = NEB_TEX * (0.04 + Math.random() * 0.05)
+            const nx = x + Math.cos(ang) * step
+            const ny = y + Math.sin(ang) * step
+            g.quadraticCurveTo(
+              x + Math.cos(ang + 0.5) * step * 0.5,
+              y + Math.sin(ang + 0.5) * step * 0.5,
+              nx,
+              ny
+            )
+            x = nx
+            y = ny
+          }
+          g.stroke()
+        }
+        g.shadowBlur = 0
+        g.globalCompositeOperation = 'source-over'
+      }
+
+      if (structured) {
+        strands(0.05, 0.02, 9, false) // wispy bright filaments
+        strands(0.16, 0.035, 3, true) // dark dust lanes carved through the body
+        // A few bright knots — embedded glow like a nebula's star-forming pockets.
+        for (let i = 0; i < 8; i++) {
+          const c = centers[Math.floor(Math.random() * centers.length)]
+          puff(
+            c.x + (Math.random() - 0.5) * c.r * 1.2,
+            c.y + (Math.random() - 0.5) * c.r,
+            NEB_TEX * (0.015 + Math.random() * 0.02),
+            0.14
+          )
+        }
+      }
+
+      const tint = document.createElement('canvas')
+      tint.width = tint.height = NEB_TEX
+      return { tex, tint, tctx: tint.getContext('2d')! }
+    }
+
+    interface Nebula {
+      core: NebulaLayer // structured, tinted in the field's current hue
+      haze: NebulaLayer // offset outer glow, tinted in the neighbor hue
+      rot: number
+      rotV: number
+    }
+    const makeNebula = (): Nebula => ({
+      core: makeNebulaLayer(true),
+      haze: makeNebulaLayer(false),
+      rot: Math.random() * Math.PI * 2,
+      rotV: (Math.random() < 0.5 ? -1 : 1) * (0.00012 + Math.random() * 0.0001)
+    })
+    const nebulas = [makeNebula(), makeNebula()]
+
     // Comet state: dormant until its timer fires (active mode only).
     const comet = { live: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, next: 600 + Math.random() * 1200 }
     const launchComet = () => {
@@ -136,29 +264,59 @@ export function Starfield({ active }: { active: boolean }) {
       ctx.fillStyle = `rgb(${(cr * 0.16) | 0}, ${(cg * 0.16) | 0}, ${(cb * 0.16) | 0})`
       ctx.fillRect(0, 0, width, height)
 
-      // Nebula haze: two big soft radial gradients on slow sine paths, in the
-      // current hue and its palette neighbor, so the space has depth.
+      // Nebulas: tint the pre-rendered cloud layers and blit them with slow
+      // drift, rotation and breathing scale. Two hues per nebula — the
+      // structured core in the field's current hue, the offset outer haze in
+      // the palette neighbor — gives the two-tone look of the real thing.
       const neighbor = palette[(cTo + 2) % palette.length]
-      const blob = (cx: number, cy: number, r: number, rgb: number[], a: number) => {
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-        g.addColorStop(0, `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${a})`)
-        g.addColorStop(1, 'rgba(0,0,0,0)')
-        ctx.fillStyle = g
-        ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
+      const tintLayer = (l: NebulaLayer, rgb: number[]) => {
+        l.tctx.globalCompositeOperation = 'source-over'
+        l.tctx.clearRect(0, 0, NEB_TEX, NEB_TEX)
+        l.tctx.drawImage(l.tex, 0, 0)
+        l.tctx.globalCompositeOperation = 'source-in'
+        l.tctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`
+        l.tctx.fillRect(0, 0, NEB_TEX, NEB_TEX)
       }
-      blob(
+      const drawNebula = (
+        n: Nebula,
+        cx: number,
+        cy: number,
+        scale: number,
+        rgbCore: number[],
+        rgbHaze: number[],
+        a: number
+      ) => {
+        tintLayer(n.haze, rgbHaze)
+        tintLayer(n.core, rgbCore)
+        n.rot += n.rotV
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(n.rot)
+        ctx.globalAlpha = a * 0.75
+        ctx.drawImage(n.haze.tint, -scale / 2, -scale / 2, scale, scale)
+        ctx.globalAlpha = a
+        ctx.drawImage(n.core.tint, -scale / 2, -scale / 2, scale, scale)
+        ctx.restore()
+        ctx.globalAlpha = 1
+      }
+      drawNebula(
+        nebulas[0],
         width * (0.3 + 0.1 * Math.sin(t / 900)),
         height * (0.35 + 0.08 * Math.cos(t / 1100)),
-        Math.max(width, height) * 0.45,
+        Math.max(width, height) * (1.05 + 0.05 * Math.sin(t / 1300)),
         [cr, cg, cb],
-        0.05
+        neighbor,
+        0.34
       )
-      blob(
+      // The second nebula swaps the hue pairing so the two clouds contrast.
+      drawNebula(
+        nebulas[1],
         width * (0.72 + 0.08 * Math.cos(t / 1000)),
         height * (0.7 + 0.1 * Math.sin(t / 800)),
-        Math.max(width, height) * 0.38,
+        Math.max(width, height) * (0.88 + 0.04 * Math.cos(t / 1500)),
         neighbor,
-        0.04
+        [cr, cg, cb],
+        0.27
       )
 
       // Stars.

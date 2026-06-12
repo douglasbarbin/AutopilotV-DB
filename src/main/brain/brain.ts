@@ -111,6 +111,7 @@ export class Brain extends EventEmitter {
       // module graphs light (same rationale as dev/phases' verify import).
       const { maybeConsolidateKnowledge } = await import('../analysis/consolidate')
       await maybeConsolidateKnowledge(store.getSettings())
+      this.maybePruneHistory()
     } catch (err) {
       log.error('tick failed', { err: String(err) })
       store.recordEvent('tick.error', { err: String(err) }, { level: 'error' })
@@ -407,6 +408,21 @@ export class Brain extends EventEmitter {
         store.releaseLease('dev', task.id)
         this.reason('dev', `Could not start ${task.issueKey} — no cloned repo available.`, { key: task.issueKey }, 'warn')
       }
+    }
+  }
+
+  /** Once a day, sweep append-only history (events, finished tasks' verification
+   *  rows) so the DB stays small. The working-set queries are already bounded;
+   *  this keeps the underlying tables from growing without limit too. */
+  private maybePruneHistory(): void {
+    const today = new Date().toISOString().slice(0, 10)
+    if (store.kvRead('lastHistoryPrune') === today) return
+    store.kvWrite('lastHistoryPrune', today)
+    const events = store.pruneEvents(30)
+    const verifications = store.pruneVerifications(30)
+    if (events + verifications > 0) {
+      log.info('history pruned', { events, verifications })
+      store.recordEvent('history.pruned', { events, verifications })
     }
   }
 

@@ -114,6 +114,22 @@ export function listFollowUps(status?: FollowUpStatus): FollowUp[] {
   return rows.map(rowToFollowUp)
 }
 
+/**
+ * The slice pushed to the renderer: open candidates plus a 7-day window of
+ * resolved rows (the Insights view shows "recently created" for a week).
+ * The full history stays queryable via listFollowUps for the dedupe engine.
+ */
+export function listFollowUpsForState(limit = 300): FollowUp[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM followups
+       WHERE status = 'candidate' OR updated_at >= datetime('now', '-7 days')
+       ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(limit) as FollowUpRow[]
+  return rows.map(rowToFollowUp)
+}
+
 export function getFollowUp(id: number): FollowUp | null {
   const row = getDb().prepare('SELECT * FROM followups WHERE id = ?').get(id) as FollowUpRow | undefined
   return row ? rowToFollowUp(row) : null
@@ -228,6 +244,17 @@ export function listKnowledge(status?: KnowledgeStatus): KnowledgeItem[] {
       ? getDb().prepare('SELECT * FROM knowledge WHERE status = ? ORDER BY created_at DESC').all(status)
       : getDb().prepare('SELECT * FROM knowledge ORDER BY created_at DESC').all()
   ) as KnowledgeRow[]
+  return rows.map(rowToKnowledge)
+}
+
+/** The slice pushed to the renderer: only statuses the Insights view renders. */
+export function listKnowledgeForState(limit = 300): KnowledgeItem[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM knowledge WHERE status IN ('candidate', 'active')
+       ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(limit) as KnowledgeRow[]
   return rows.map(rowToKnowledge)
 }
 

@@ -36,6 +36,16 @@ export function recordEvent(
     .run(opts.level ?? 'info', opts.sessionId ?? null, kind, JSON.stringify(payload))
 }
 
+/** Retention sweep: drop events (incl. brain notes) older than `days`.
+ *  The log is append-only and grows by hundreds of rows a day; the UI only
+ *  ever shows the most recent 200. Returns the number of rows deleted. */
+export function pruneEvents(days = 30): number {
+  const info = getDb()
+    .prepare("DELETE FROM events WHERE ts < datetime('now', ?)")
+    .run(`-${days} days`)
+  return info.changes
+}
+
 export function listEvents(limit = 200): AppEvent[] {
   const rows = getDb()
     .prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?')

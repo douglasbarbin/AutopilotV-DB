@@ -61,6 +61,7 @@ export {
   resetPrReview,
   insertReview,
   listReviews,
+  getReview,
   getLatestReviewForPr,
   recordReviewAction
 } from './reviews'
@@ -82,13 +83,15 @@ export { createWorktree, attachWorktreeSession, getWorktree, listWorktrees, list
 
 export { claimWork, setClaimState, attachSessionToWork, renewLease, releaseLease, reclaimExpiredLeases } from './claim'
 
-export { recordEvent, listEvents, recordBrainNote, listBrainNotes } from './events'
+export { recordEvent, listEvents, pruneEvents, recordBrainNote, listBrainNotes } from './events'
 
-export { insertVerification, listVerificationsForTask, listRecentVerifications, getPipelineVerdict } from './verifications'
+export { insertVerification, listVerificationsForTask, listRecentVerifications, getPipelineVerdict, pruneVerifications } from './verifications'
 
 export {
   insertFollowUp,
   listFollowUps,
+  listFollowUpsForState,
+  listKnowledgeForState,
   getFollowUp,
   updateFollowUp,
   deleteFollowUp,

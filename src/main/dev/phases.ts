@@ -172,6 +172,15 @@ export async function advanceRevising(task: TrackerTask, settings: Settings): Pr
   }
 }
 
+/** Write a warn note at most once per kv key — these checks now re-run every
+ *  tick against a persisted verdict, and repeating the same holding-pattern
+ *  message each tick would flood the Brain feed. */
+function noteOnce(kvKey: string, task: TrackerTask, message: string): void {
+  if (store.kvRead(kvKey)) return
+  store.kvWrite(kvKey, new Date().toISOString())
+  note('dev', message, { key: task.issueKey }, 'warn')
+}
+
 /**
  * Spawn a verification-fix session only when an agent can plausibly help:
  *  - never for the secrets stage (a locked secrets manager / broken runbook
@@ -186,24 +195,22 @@ async function maybeSpawnVerificationFix(
   worktree: { path: string; id: number } | null,
   verdict: { failureSummary?: string; failureStage?: string }
 ): Promise<void> {
+  const { currentSha } = await import('./verify')
+  const sha = worktree ? await currentSha(worktree.path) : ''
   if (verdict.failureStage === 'secrets') {
-    note(
-      'dev',
-      `${task.issueKey}: verification is blocked on the SECRETS stage — fix the runbook or unlock the secrets manager, then Refresh secrets. Not spawning an agent (it can't fix that).`,
-      { key: task.issueKey },
-      'warn'
+    noteOnce(
+      `secretsheld:${task.id}:${sha}`,
+      task,
+      `${task.issueKey}: verification is blocked on the SECRETS stage — fix the runbook or unlock the secrets manager, then Refresh secrets. Not spawning an agent (it can't fix that).`
     )
     return
   }
-  const { currentSha } = await import('./verify')
-  const sha = worktree ? await currentSha(worktree.path) : ''
   const spawnKey = `fixspawned:${task.id}:${sha}`
   if (sha && store.kvRead(spawnKey)) {
-    note(
-      'dev',
-      `${task.issueKey}: a fix session already ran for commit ${sha.slice(0, 7)} without resolving verification — holding for a human or a new commit.`,
-      { key: task.issueKey },
-      'warn'
+    noteOnce(
+      `fixheld:${task.id}:${sha}`,
+      task,
+      `${task.issueKey}: a fix session already ran for commit ${sha.slice(0, 7)} without resolving verification — holding for a human or a new commit.`
     )
     return
   }
@@ -225,6 +232,12 @@ async function maybeSpawnVerificationFix(
  * without runbook stages skip this (the merge gate's legacy command covers
  * them).
  *
+ * The pipeline itself runs on the background verification queue — this
+ * function only reads persisted verdicts and enqueues missing ones, so a
+ * 20-minute e2e run never freezes the brain tick. While the job is queued or
+ * running this returns false ("not proven yet"); the tick that follows the
+ * verdict consumes it here.
+ *
  * Returns true when the draft is proven (or the checkpoint doesn't apply).
  */
 async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promise<boolean> {
@@ -245,7 +258,7 @@ async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promis
   }
   if (isTaskSessionActive(task)) return false // fix session still working
 
-  const { currentSha } = await import('./verify')
+  const { currentSha, failureFromVerdict } = await import('./verify')
   const sha = await currentSha(worktree.path)
   if (!sha) return true
 
@@ -254,20 +267,27 @@ async function runDraftCheckpoint(task: TrackerTask, settings: Settings): Promis
   const existing = store.getPipelineVerdict(task.id, 'draft', sha)
   if (existing && verdictIsCurrent(repo, existing)) {
     // 'error' rollups (e.g. invalid runbook) surface but never block.
-    return existing.status !== 'fail'
+    if (existing.status !== 'fail') return true
+    // Failed verdict: make sure a fix session exists (guarded once per commit).
+    await maybeSpawnVerificationFix(task, repo, worktree, failureFromVerdict(existing))
+    return false
   }
 
-  const r = await runPipeline(task, repo, worktree, settings, 'draft', sha)
-  if (r.ok) {
-    note('dev', `${task.issueKey}: draft checkpoint passed — change proven runnable at ${sha.slice(0, 7)}.`, {
+  const { isVerificationPending, enqueueVerification } = await import('./verifyQueue')
+  const key = `verify:${task.id}:draft:${sha}`
+  if (!isVerificationPending(key)) {
+    note('dev', `${task.issueKey}: draft checkpoint queued for ${sha.slice(0, 7)} — verifying in the background.`, {
       key: task.issueKey
     })
-    return true
+    enqueueVerification(key, async () => {
+      const r = await runPipeline(task, repo, worktree, settings, 'draft', sha)
+      if (r.ok) {
+        note('dev', `${task.issueKey}: draft checkpoint passed — change proven runnable at ${sha.slice(0, 7)}.`, {
+          key: task.issueKey
+        })
+      }
+    })
   }
-  await maybeSpawnVerificationFix(task, repo, worktree, {
-    failureSummary: r.failureSummary,
-    failureStage: r.failedStage
-  })
   return false
 }
 
@@ -369,7 +389,9 @@ export async function advanceReview(task: TrackerTask, settings: Settings): Prom
       if (settings.verifyBeforeReady) {
         const verdict = await verifyTaskForMerge(task, settings)
         if (!verdict.ok) {
-          if (!isTaskSessionActive(task)) {
+          // pending = the verification job is still running in the background;
+          // nothing to fix yet — check again next tick.
+          if (!verdict.pending && !isTaskSessionActive(task)) {
             await maybeSpawnVerificationFix(task, repo, worktree, verdict)
           }
           return
@@ -576,9 +598,11 @@ async function startVerificationFix(
   }, 'warn')
 }
 
-/** PR merged → stop tracking. Run post-merge analysis (it needs the worktree's
- *  diff, so it runs before pruning), prune the worktree; do NOT touch the
- *  tracker (QA owns Done). */
+/** PR merged → stop tracking. The task is completed immediately; post-merge
+ *  analysis (an LLM pass over the diff) and worktree pruning are slow and
+ *  nothing downstream needs them, so they run off-tick in the background.
+ *  Analysis needs the worktree's diff, so it runs before the prune. Do NOT
+ *  touch the tracker (QA owns Done). */
 export async function finishMerged(task: TrackerTask): Promise<void> {
   if (task.sessionId && sessionManager.isLive(task.sessionId)) {
     sessionManager.kill(task.sessionId, 'pr merged')
@@ -589,21 +613,27 @@ export async function finishMerged(task: TrackerTask): Promise<void> {
   } catch {
     /* no instances module loaded — nothing running */
   }
-  try {
-    const { runPostMergeAnalysis } = await import('../analysis/engine')
-    await runPostMergeAnalysis(task, store.getSettings())
-  } catch (err) {
-    log.warn('post-merge analysis failed', { taskId: task.id, err: String(err) })
-  }
-  if (task.worktreeId) {
-    const wt = store.getWorktree(task.worktreeId)
-    if (wt && !wt.prunedAt) {
-      const { pruneWorktree } = await import('../worktree/manager')
-      await pruneWorktree(wt)
-    }
-  }
   store.completeTask(task.id)
   note('dev', `PR #${task.prNumber} for ${task.issueKey} merged — done, no longer tracking.`, { key: task.issueKey })
+  void (async () => {
+    try {
+      const { runPostMergeAnalysis } = await import('../analysis/engine')
+      await runPostMergeAnalysis(task, store.getSettings())
+    } catch (err) {
+      log.warn('post-merge analysis failed', { taskId: task.id, err: String(err) })
+    }
+    try {
+      if (task.worktreeId) {
+        const wt = store.getWorktree(task.worktreeId)
+        if (wt && !wt.prunedAt) {
+          const { pruneWorktree } = await import('../worktree/manager')
+          await pruneWorktree(wt)
+        }
+      }
+    } catch (err) {
+      log.warn('post-merge worktree prune failed', { taskId: task.id, err: String(err) })
+    }
+  })()
 }
 
 // ──────────────────────────── dispatcher ────────────────────────────

@@ -479,7 +479,19 @@ export async function runPipeline(
     summary: stagesOk
       ? `pipeline passed at ${checkpoint} (${[...new Set(ran)].join(' → ') || 'no stages'})`
       : `pipeline failed at ${checkpoint}: ${failure!.stage} — ${failure!.summary}`,
-    detail: { stages: ran, source: resolved.source, runbookRev: runbookRev(repo) }
+    detail: {
+      stages: ran,
+      source: resolved.source,
+      runbookRev: runbookRev(repo),
+      // Failure detail rides the rollup so a later tick (verification now runs
+      // in the background) can build the fix-session prompt from the verdict.
+      ...(stagesOk
+        ? {}
+        : {
+            failedStage: failure!.stage,
+            failureSummary: `[${failure!.stage}] ${failure!.summary}\n\n${failure!.output.slice(-2000)}`
+          })
+    }
   })
 
   if (!stagesOk) {

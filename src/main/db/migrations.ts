@@ -338,6 +338,23 @@ const MIGRATIONS: Migration[] = [
     ALTER TABLE tasks ADD COLUMN approvals INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE tasks ADD COLUMN reviewers_requested INTEGER NOT NULL DEFAULT 0;
     `
+  },
+  {
+    // Indexes for the columns every tick and every state push filter on.
+    // These tables are append-heavy; without them each buildState/scheduleWork
+    // pass is a full table scan that gets slower as history accumulates.
+    version: 18,
+    up: `
+    CREATE INDEX idx_tasks_phase ON tasks(phase);
+    CREATE INDEX idx_tasks_status ON tasks(status);
+    CREATE INDEX idx_tasks_updated ON tasks(updated_at);
+    CREATE INDEX idx_pr_reviews_state ON pr_reviews(state);
+    CREATE INDEX idx_pr_reviews_updated ON pr_reviews(updated_at);
+    CREATE INDEX idx_reviews_pr_review ON reviews(pr_review_id);
+    CREATE INDEX idx_sessions_started ON sessions(started_at);
+    CREATE INDEX idx_worktrees_pruned ON worktrees(pruned_at);
+    CREATE INDEX idx_task_verifications_verdict ON task_verifications(task_id, checkpoint, commit_sha, kind);
+    `
   }
 ]
 
