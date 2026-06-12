@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { ActiveVerification, AppState, PrReview, TaskVerification, TrackerTask } from '@shared/types/domain'
 import { api } from '../api'
@@ -416,7 +416,12 @@ function TaskRow({
             </button>
           </>
         )}
-        <TaskMenu task={task} showDiff={showDiff} onToggleDiff={() => setShowDiff((v) => !v)} />
+        <TaskMenu
+          task={task}
+          showDiff={showDiff}
+          onToggleDiff={() => setShowDiff((v) => !v)}
+          onRequestChanges={() => setRequesting(true)}
+        />
       </div>
       {takingOver && (
         <div className="request-form takeover-form">
@@ -450,7 +455,7 @@ function TaskRow({
             rows={3}
             autoFocus
             value={text}
-            placeholder="Describe the changes to make to the draft (committed & pushed to the PR)…"
+            placeholder="Describe the changes to make (committed & pushed to the existing PR)…"
             onChange={(e) => setText(e.target.value)}
           />
           <div className="request-actions">
@@ -482,13 +487,36 @@ function TaskRow({
 function TaskMenu({
   task,
   showDiff,
-  onToggleDiff
+  onToggleDiff,
+  onRequestChanges
 }: {
   task: TrackerTask
   showDiff: boolean
   onToggleDiff: () => void
+  onRequestChanges: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLSpanElement>(null)
+  // Close on any click outside the menu and on Escape. A fixed-position
+  // backdrop element can't do this job from inside the card: the card's hover
+  // transform makes it the containing block, so "inset: 0" only covered the
+  // card and clicks elsewhere never reached the backdrop.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
   const items: { label: string; danger?: boolean; run: () => void }[] = []
   if (task.prNumber != null || task.worktreeId != null) {
     items.push({ label: showDiff ? 'Hide diff' : 'View diff', run: onToggleDiff })
@@ -496,33 +524,35 @@ function TaskMenu({
   if (task.worktreeId != null && task.phase !== 'done') {
     items.push({ label: 'Open terminal', run: () => void api.openTerminal(task.id) })
   }
+  // Merge stays the primary action for a green PR; a late change request is the
+  // exception path, so it lives here instead of crowding the action bar.
+  if (task.phase === 'ready_to_merge' && task.worktreeId != null) {
+    items.push({ label: 'Request changes…', run: onRequestChanges })
+  }
   if (['implementing', 'in_review', 'revising'].includes(task.phase)) {
     items.push({ label: 'Reset task…', danger: true, run: () => void api.resetDev(task.id) })
   }
   if (items.length === 0) return null
   return (
-    <span className="task-menu">
+    <span className="task-menu" ref={rootRef}>
       <button className="btn-ghost task-menu-btn" title="More actions" onClick={() => setOpen((v) => !v)}>
         ⋯
       </button>
       {open && (
-        <>
-          <span className="task-menu-backdrop" onClick={() => setOpen(false)} />
-          <span className="task-menu-pop">
-            {items.map((it) => (
-              <button
-                key={it.label}
-                className={`task-menu-item ${it.danger ? 'danger' : ''}`}
-                onClick={() => {
-                  setOpen(false)
-                  it.run()
-                }}
-              >
-                {it.label}
-              </button>
-            ))}
-          </span>
-        </>
+        <span className="task-menu-pop">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              className={`task-menu-item ${it.danger ? 'danger' : ''}`}
+              onClick={() => {
+                setOpen(false)
+                it.run()
+              }}
+            >
+              {it.label}
+            </button>
+          ))}
+        </span>
       )}
     </span>
   )

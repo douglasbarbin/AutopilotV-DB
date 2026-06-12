@@ -2317,11 +2317,6 @@ button:disabled {
   font-weight: 700;
   letter-spacing: 0.1em;
 }
-.task-menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 49;
-}
 .task-menu-pop {
   position: absolute;
   right: 0;
