@@ -69,7 +69,8 @@ describe('sessionManager.kill', () => {
     expect(s.exitReason).toContain('no live process')
   })
 
-  it('escalates to SIGKILL for processes that ignore SIGTERM/SIGHUP', async () => {
+  // POSIX-only: needs /bin/sh and trap/SIGTERM semantics that don't exist on Windows.
+  it.skipIf(process.platform === 'win32')('escalates to SIGKILL for processes that ignore SIGTERM/SIGHUP', async () => {
     const id = sessionManager.spawn({
       kind: 'dev',
       workRef: 'dev:2',

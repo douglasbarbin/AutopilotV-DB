@@ -29,7 +29,8 @@ describe('sanitizeChildEnv', () => {
     })
   })
 
-  it('exec strips the vars even when an explicit env is passed', async () => {
+  // POSIX-only: relies on sh $VAR expansion; cmd.exe prints the string literally.
+  it.skipIf(process.platform === 'win32')('exec strips the vars even when an explicit env is passed', async () => {
     const r = await execShell('echo "prefix=[$npm_config_local_prefix] home=[$HOME]"', {
       env: { ...process.env, npm_config_local_prefix: '/stale/project', HOME: '/Users/x' }
     })

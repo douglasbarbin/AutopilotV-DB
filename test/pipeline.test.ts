@@ -184,7 +184,8 @@ describe('runPipeline', () => {
     expect(r.ranStages).toEqual([])
   })
 
-  it('app.persist state roams to the next worktree so the app skips re-initialization', async () => {
+  // POSIX-only: the app slot runs `sh -c "test -f ..."`, unavailable on Windows runners.
+  it.skipIf(process.platform === 'win32')('app.persist state roams to the next worktree so the app skips re-initialization', async () => {
     // First "worktree": the app seeds on start (creates seed.lock) — like an
     // emulator initializer that would need `op` to seed.
     const yaml = [

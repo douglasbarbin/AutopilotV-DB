@@ -50,7 +50,8 @@ describe('appInstances (detached launchers)', () => {
     closeDb()
   })
 
-  it('a detached launcher that prints its ready line and exits 0 is ready; teardown still runs', async () => {
+  // POSIX-only: the teardown uses `touch` and the run line uses sh `;` chaining.
+  it.skipIf(process.platform === 'win32')('a detached launcher that prints its ready line and exits 0 is ready; teardown still runs', async () => {
     const repo = repoStub()
     const app = appSlot({
       run: 'echo "Dashboard: https://localhost:18999/login?t=x"; exit 0',
