@@ -529,7 +529,11 @@ function TaskMenu({
   if (task.phase === 'ready_to_merge' && task.worktreeId != null) {
     items.push({ label: 'Request changes…', run: onRequestChanges })
   }
-  if (['implementing', 'in_review', 'revising'].includes(task.phase)) {
+  // Any non-terminal driving phase can wedge (a stuck draft whose PR merged
+  // out-of-band, a ready_to_merge whose merge keeps failing) — Reset tears it
+  // down to a fresh unclaimed item, disassociating the PR and discarding the
+  // worktree. 'error' has its own Retry; 'unclaimed'/'done' have nothing to reset.
+  if (['implementing', 'draft', 'revising', 'in_review', 'ready_to_merge'].includes(task.phase)) {
     items.push({ label: 'Reset task…', danger: true, run: () => void api.resetDev(task.id) })
   }
   if (items.length === 0) return null
