@@ -161,6 +161,10 @@ export const githubForge: Forge = {
   },
 
   async findPrForBranch(repoNwo: string, branch: string) {
+    // OPEN only. A merged/closed PR on this branch is stale — adopting it
+    // re-associates a finished PR with a fresh attempt (e.g. a re-handed task
+    // whose deterministic branch name still matches a merged PR). Both callers
+    // (PR discovery, draft→review check) only ever want the live PR.
     const r = await exec('gh', [
       'pr',
       'list',
@@ -169,7 +173,7 @@ export const githubForge: Forge = {
       '--head',
       branch,
       '--state',
-      'all',
+      'open',
       '--json',
       'number,url,isDraft,state',
       '--limit',

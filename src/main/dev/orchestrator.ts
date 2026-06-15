@@ -70,10 +70,13 @@ export async function startDevTask(task: TrackerTask): Promise<number | null> {
   }
 
   const prefix = (store.getSettings().branchPrefix || 'autopilotv/').replace(/\/*$/, '/')
-  const branch = `${prefix}${task.issueKey}-${slug(task.title)}`
+  const requestedBranch = `${prefix}${task.issueKey}-${slug(task.title)}`
   let worktree
   try {
-    worktree = await provisionDevWorktree(repo, branch)
+    // provisionDevWorktree may disambiguate the branch name (e.g. a prior
+    // attempt's branch still on the remote), so the actual branch the agent
+    // works on is worktree.branch — used in the prompt below, not the request.
+    worktree = await provisionDevWorktree(repo, requestedBranch)
   } catch (err) {
     log.error('dev worktree provision failed', { taskId: task.id, err: String(err) })
     note('dev', `Couldn't create a worktree for ${task.issueKey}: ${String(err).slice(0, 80)}`, {}, 'warn')
@@ -97,7 +100,7 @@ export async function startDevTask(task: TrackerTask): Promise<number | null> {
   const prompt = buildDevStartPrompt({
     issueKey: task.issueKey,
     title: task.title,
-    branch,
+    branch: worktree.branch,
     baseBranch: repo.defaultBranch,
     repoName: repo.name,
     worktreePath: worktree.path

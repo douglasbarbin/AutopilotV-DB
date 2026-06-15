@@ -216,10 +216,30 @@ export async function provisionReviewWorktree(
   return store.getWorktree(id)!
 }
 
+/** A branch name that doesn't already exist on origin. Re-handed tasks reuse a
+ *  deterministic name (issueKey + title slug); if a prior attempt's branch is
+ *  still on the remote (e.g. its PR merged without branch auto-delete), pushing
+ *  to it conflicts and a stale PR can get re-adopted. Disambiguate with a
+ *  numeric suffix so each fresh attempt is isolated. A purely-local stale branch
+ *  is left to the self-heal below (it deletes and reuses the base name). */
+async function uniqueRemoteBranch(cwd: string, base: string): Promise<string> {
+  const onRemote = async (name: string): Promise<boolean> => {
+    const r = await exec('git', ['ls-remote', '--heads', 'origin', name], { cwd })
+    return r.code === 0 && r.stdout.trim().length > 0
+  }
+  if (!(await onRemote(base))) return base
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${base}-${n}`
+    if (!(await onRemote(candidate))) return candidate
+  }
+  return base // give up disambiguating after 100 tries; self-heal handles local
+}
+
 /** Provision a fresh feature worktree for the dev line (not sandboxed). */
-export async function provisionDevWorktree(repo: Repo, branch: string): Promise<Worktree> {
+export async function provisionDevWorktree(repo: Repo, requestedBranch: string): Promise<Worktree> {
   if (!repo.path) throw new Error(`repo ${repo.name} not cloned locally`)
   const cwd = repo.path
+  const branch = await uniqueRemoteBranch(cwd, requestedBranch)
   const safe = branch.replace(/[^A-Za-z0-9._/-]/g, '-')
   const dest = join(worktreeRoot(repo), safe.replace(/\//g, '__'))
 

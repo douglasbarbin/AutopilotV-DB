@@ -298,21 +298,11 @@ export const azureDevOpsForge: Forge = {
       const url = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests?api-version=7.1-preview.1&searchCriteria.sourceRefName=refs/heads/${encodeURIComponent(branch)}&searchCriteria.status=active`
       const r = (await adoFetch('GET', url, pat)) as any
       const arr: any[] = Array.isArray(r) ? r : Array.isArray(r?.value) ? r.value : []
+      // Active only — never fall back to closed/completed. A merged PR on this
+      // branch is stale; adopting it would re-associate a finished PR with a
+      // fresh attempt (matches the GitHub adapter's open-only lookup).
       const row = arr[0]
-      if (!row) {
-        // Fallback: check all (open + closed) so we can still surface a closed PR.
-        const urlAll = `${baseUrl(org)}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullRequests?api-version=7.1-preview.1&searchCriteria.sourceRefName=refs/heads/${encodeURIComponent(branch)}&searchCriteria.status=all`
-        const rAll = (await adoFetch('GET', urlAll, pat)) as any
-        const arrAll: any[] = Array.isArray(rAll) ? rAll : Array.isArray(rAll?.value) ? rAll.value : []
-        const rowAll = arrAll[0]
-        if (!rowAll) return null
-        return {
-          number: Number(rowAll.pullRequestId),
-          url: rowAll.url ?? buildPrUrl(org, project, repo, Number(rowAll.pullRequestId)),
-          isDraft: !!rowAll.isDraft,
-          state: normalizePrState(rowAll.status)
-        }
-      }
+      if (!row) return null
       return {
         number: Number(row.pullRequestId),
         url: row.url ?? buildPrUrl(org, project, repo, Number(row.pullRequestId)),
